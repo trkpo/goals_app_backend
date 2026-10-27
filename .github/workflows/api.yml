@@ -1,0 +1,41 @@
+name: API contract
+
+on:
+  pull_request:
+    paths: ["api/**", ".github/workflows/api.yml"]
+  push:
+    branches: [main]
+    paths: ["api/**", ".github/workflows/api.yml"]
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Lint spec, check client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint OpenAPI
+        run: npm run lint
+
+      - name: Generated client is up to date
+        run: |
+          npm run generate
+          git diff --exit-code -- client/schema.d.ts \
+            || { echo "::error::client/schema.d.ts устарел — выполните npm run generate в каталоге api"; exit 1; }
+
+      - name: Typecheck client
+        run: npm run typecheck
