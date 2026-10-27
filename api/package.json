@@ -1,0 +1,32 @@
+{
+  "name": "@trkpo/goals-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenAPI-контракт Goals App и типизированный клиент для frontend",
+  "type": "module",
+  "exports": {
+    ".": "./client/index.ts",
+    "./schema": "./client/schema.d.ts"
+  },
+  "files": [
+    "openapi.yaml",
+    "client"
+  ],
+  "scripts": {
+    "lint": "redocly lint openapi.yaml",
+    "generate": "openapi-typescript openapi.yaml -o client/schema.d.ts",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run generate && npm run typecheck",
+    "mock": "prism mock openapi.yaml --host 0.0.0.0 --port 4010",
+    "docs": "redocly build-docs openapi.yaml -o dist/index.html"
+  },
+  "dependencies": {
+    "openapi-fetch": "0.17.0"
+  },
+  "devDependencies": {
+    "@redocly/cli": "2.62.1",
+    "@stoplight/prism-cli": "5.16.0",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3"
+  }
+}

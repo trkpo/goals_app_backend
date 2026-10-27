@@ -1,0 +1,2031 @@
+openapi: 3.1.0
+info:
+  title: Goals App API
+  version: 1.0.0
+  description: |
+    Контракт API приложения целей. Источник требований — [`docs/API.md`](../docs/API.md).
+
+    - Аутентификация: `Authorization: Bearer <access_token>`, refresh-токен — в cookie `refresh_token`
+      (`HttpOnly; Secure; SameSite=Strict`).
+    - Пагинация курсорная: `?limit=1..100&cursor=<opaque>`, в ответе `next_cursor` (`null` на последней странице).
+    - Все ошибки возвращаются в едином конверте `Error`.
+    - Изменяющие операции принимают `Idempotency-Key`: повтор с тем же ключом возвращает результат первого запроса.
+    - Ограничение частоты: `429 TOO_MANY_REQUESTS` с заголовком `Retry-After`.
+servers:
+  - url: http://localhost:8080
+    description: Локальный backend
+  - url: http://localhost:4010
+    description: Mock-сервер Prism (`npm run mock` в каталоге `api`)
+
+tags:
+  - name: identity
+    description: Регистрация, вход, подтверждение адреса и восстановление пароля
+  - name: profiles
+    description: Профиль пользователя и аватары
+  - name: goals
+    description: Цели, их статусы и итоги
+  - name: feed
+    description: Лента публикаций и реакции
+  - name: notifications
+    description: Напоминания и их настройки
+  - name: audit
+    description: Журнал операций, только для внутренних сервисов
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------- identity
+  /api/v1/identity/auth/register:
+    post:
+      tags: [identity]
+      operationId: identityAuthRegister
+      summary: Регистрация по e-mail и паролю
+      description: |
+        Учётная запись создаётся в статусе «Ожидает подтверждения e-mail», вход до подтверждения невозможен (F_Auth_9).
+        На адрес отправляется шестизначный код, срок действия 10 минут (F_Auth_12).
+        Повтор без `Idempotency-Key` с тем же e-mail → `409 EMAIL_TAKEN`.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: Учётная запись создана, код подтверждения отправлен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/identity/email/confirm:
+    post:
+      tags: [identity]
+      operationId: identityEmailConfirm
+      summary: Подтверждение адреса кодом из письма
+      description: |
+        Код — 6 цифр, действует 10 минут, одноразовый. Неверный код можно вводить повторно,
+        но не более 3 проверок в минуту (F_Auth_13, F_Auth_15).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailCodeRequest"
+      responses:
+        "200":
+          description: Адрес подтверждён, вход разрешён (F_Auth_18)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailConfirmResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/identity/email/confirm/resend:
+    post:
+      tags: [identity]
+      operationId: identityEmailConfirmResend
+      summary: Повторная отправка кода подтверждения
+      description: Не чаще одного раза в 5 минут (F_Auth_14); предыдущий код перестаёт действовать (F_Auth_15).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRequest"
+      responses:
+        "202":
+          description: Новый код отправлен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailConfirmationSent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/identity/auth/login:
+    post:
+      tags: [identity]
+      operationId: identityAuthLogin
+      summary: Вход по e-mail и паролю
+      description: |
+        Вход возможен только после подтверждения адреса. Неподтверждённый адрес считается
+        незарегистрированным → `401 USER_NOT_FOUND` (F_Auth_4). Не более 5 неудачных попыток в минуту.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Вход выполнен
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshTokenCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/identity/auth/refresh:
+    post:
+      tags: [identity]
+      operationId: identityAuthRefresh
+      summary: Обновление access-токена
+      description: Refresh-токен ротируется — выдаётся новый cookie, предыдущий становится недействительным.
+      security:
+        - refreshCookie: []
+      responses:
+        "200":
+          description: Новый access-токен
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/RefreshTokenCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccessToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/identity/password/request:
+    post:
+      tags: [identity]
+      operationId: identityPasswordRequest
+      summary: Восстановление пароля, шаг 1 — отправка кода
+      description: |
+        Ответ не зависит от того, зарегистрирован ли адрес. Новый код — не чаще раза в 5 минут (F_Auth_14).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailRequest"
+      responses:
+        "202":
+          description: Код отправлен (если адрес зарегистрирован)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CodeSent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/identity/password/verify:
+    post:
+      tags: [identity]
+      operationId: identityPasswordVerify
+      summary: Восстановление пароля, шаг 2 — проверка кода
+      description: Не более 3 проверок в минуту (F_Auth_13). При успехе выдаётся одноразовый `reset_token`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmailCodeRequest"
+      responses:
+        "200":
+          description: Код верный
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetToken"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+
+  /api/v1/identity/password/reset:
+    post:
+      tags: [identity]
+      operationId: identityPasswordReset
+      summary: Восстановление пароля, шаг 3 — новый пароль
+      description: Токен одноразовый, действует 10 минут. После смены все активные сеансы отзываются (NF_Sec_4).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordResetRequest"
+      responses:
+        "204":
+          description: Пароль изменён
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "410":
+          $ref: "#/components/responses/Gone"
+
+  /api/v1/identity/users/me:
+    get:
+      tags: [identity]
+      operationId: identityUsersMe
+      summary: Текущий пользователь
+      responses:
+        "200":
+          description: Данные учётной записи
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurrentUser"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ---------------------------------------------------------------- profiles
+  /api/v1/profiles/me:
+    get:
+      tags: [profiles]
+      operationId: profilesMeGet
+      summary: Свой профиль
+      responses:
+        "200":
+          description: Профиль владельца
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    patch:
+      tags: [profiles]
+      operationId: profilesMeUpdate
+      summary: Изменение профиля
+      description: |
+        Передаются только изменяемые поля. Новый e-mail требует подтверждения кодом (F_Prof_4),
+        до подтверждения сохраняется прежний адрес.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileUpdateRequest"
+      responses:
+        "200":
+          description: Обновлённый профиль
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    delete:
+      tags: [profiles]
+      operationId: profilesMeDelete
+      summary: Удаление аккаунта
+      description: |
+        Профиль, цели, итоги, публикации, реакции и напоминания удаляются одной транзакцией.
+        Строки ленты убирает задание очистки не позднее чем через 24 часа (NF_Data_1).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmRequest"
+      responses:
+        "202":
+          description: Аккаунт удалён, очистка ленты запланирована
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AccountDeleted"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/profiles/me/password:
+    put:
+      tags: [profiles]
+      operationId: profilesMePasswordChange
+      summary: Смена пароля
+      description: После смены все прочие сеансы отзываются (NF_Sec_4).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PasswordChangeRequest"
+      responses:
+        "204":
+          description: Пароль изменён
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/profiles/avatars:
+    get:
+      tags: [profiles]
+      operationId: profilesAvatarsList
+      summary: Список аватаров
+      description: Набор хранится в общей базе (F_Prof_2). Если он недоступен, остальные операции работают (F_Prof_3).
+      responses:
+        "200":
+          description: Доступные аватары
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AvatarList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/profiles/avatars/{avatar_id}:
+    get:
+      tags: [profiles]
+      operationId: profilesAvatarsGet
+      summary: Изображение аватара
+      description: Ссылка из поля `url` в списке аватаров. Кэшируется по `version` (ETag).
+      security: []
+      parameters:
+        - name: avatar_id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/AvatarId"
+      responses:
+        "200":
+          description: Изображение
+          headers:
+            ETag:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            image/png:
+              schema:
+                type: string
+                contentMediaType: image/png
+            image/svg+xml:
+              schema:
+                type: string
+        "304":
+          description: Не изменилось
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/v1/profiles/{user_id}:
+    get:
+      tags: [profiles]
+      operationId: profilesGet
+      summary: Чужой профиль
+      description: E-mail не возвращается — он виден только владельцу (F_Prof_7).
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Публичный профиль
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ------------------------------------------------------------------- goals
+  /api/v1/goals:
+    post:
+      tags: [goals]
+      operationId: goalsCreate
+      summary: Создание цели
+      description: При `publish=false` цель создаётся черновиком, иначе сразу активной (F_Goal_4).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalCreateRequest"
+      responses:
+        "201":
+          description: Цель создана
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoalCreated"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+    get:
+      tags: [goals]
+      operationId: goalsList
+      summary: Мои цели
+      description: Без целей возвращается пустой список и `empty=true` (F_Common_2).
+      parameters:
+        - name: status
+          in: query
+          description: Фильтр по статусу, можно повторять
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/GoalStatus"
+          style: form
+          explode: true
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created_desc, created_asc]
+            default: created_desc
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница целей
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoalList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/goals/{goal_id}:
+    parameters:
+      - $ref: "#/components/parameters/GoalId"
+    get:
+      tags: [goals]
+      operationId: goalsGet
+      summary: Цель
+      description: Черновики и личные цели доступны только автору (NF_Sec_2). `reflection` есть только у завершённой цели.
+      responses:
+        "200":
+          description: Цель
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Goal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      tags: [goals]
+      operationId: goalsUpdate
+      summary: Изменение цели
+      description: |
+        В черновике можно менять все поля, этим же запросом работает автосохранение (F_Goal_13).
+        У активной цели `goal_text` менять нельзя → `409 GOAL_LOCKED` (F_Goal_6).
+        Устаревшая правка (версия из `If-Match` не совпала) → `409 VERSION_CONFLICT`.
+        Статус меняется только через `PATCH /goals/{goal_id}/status`.
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalUpdateRequest"
+      responses:
+        "200":
+          description: Обновлённая цель
+          headers:
+            ETag:
+              $ref: "#/components/headers/ETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Goal"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+    delete:
+      tags: [goals]
+      operationId: goalsDelete
+      summary: Удаление цели
+      description: Цель, итог, публикация и реакции удаляются одной транзакцией (F_Feed_10). Повторное удаление → 404.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmRequest"
+      responses:
+        "204":
+          description: Цель удалена
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/goals/{goal_id}/status:
+    parameters:
+      - $ref: "#/components/parameters/GoalId"
+    patch:
+      tags: [goals]
+      operationId: goalsStatusUpdate
+      summary: Смена статуса цели и подведение итога
+      description: |
+        Допустимы только `draft → active` (F_Goal_4) и `active → completed` (F_Goal_5), иначе
+        `409 INVALID_STATUS_TRANSITION`. При завершении `reflection` обязателен (F_Goal_12) и задаётся один раз.
+        Смена статуса, итог и публикация сохраняются одной транзакцией (NF_Data_1).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalStatusUpdateRequest"
+      responses:
+        "200":
+          description: Статус изменён
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoalStatusUpdated"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  # -------------------------------------------------------------------- feed
+  /api/v1/feed:
+    get:
+      tags: [feed]
+      operationId: feedList
+      summary: Лента публикаций
+      description: |
+        Доступна без входа (F_Feed_1). С токеном в карточках заполняется `my_reaction`.
+        Популярность — сумма реакций (F_Feed_2). Фильтр `result` применяется к уже полученной странице,
+        поэтому страница может содержать меньше `limit` элементов (F_Feed_9).
+      security:
+        - {}
+        - bearerAuth: []
+      parameters:
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [popular, newest, oldest]
+            default: popular
+        - name: result
+          in: query
+          schema:
+            $ref: "#/components/schemas/ReflectionResult"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница ленты
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/feed/publications:
+    post:
+      tags: [feed]
+      operationId: feedPublicationsCreate
+      summary: Публикация итога цели
+      description: |
+        Нужна, если публикация не была запрошена при завершении цели. Только для завершённой цели с итогом.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicationCreateRequest"
+      responses:
+        "201":
+          description: Публикация создана
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Publication"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+
+  /api/v1/feed/publications/{publication_id}:
+    parameters:
+      - $ref: "#/components/parameters/PublicationId"
+    patch:
+      tags: [feed]
+      operationId: feedPublicationsVisibilityUpdate
+      summary: Скрытие и повторный показ публикации
+      description: Скрытие не удаляет реакции (F_Feed_8).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisibilityUpdateRequest"
+      responses:
+        "200":
+          description: Видимость изменена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Publication"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [feed]
+      operationId: feedPublicationsDelete
+      summary: Удаление публикации
+      description: Реакции удаляются каскадно в той же транзакции.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "204":
+          description: Публикация удалена
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/feed/publications/{publication_id}/reactions:
+    parameters:
+      - $ref: "#/components/parameters/PublicationId"
+    put:
+      tags: [feed]
+      operationId: feedReactionsSet
+      summary: Реакция на публикацию
+      description: |
+        Одна реакция на пользователя (F_Feed_6). Другой тип заменяет реакцию, тот же тип — снимает её (F_Feed_7).
+        На свою публикацию реагировать нельзя → `403 CANNOT_REACT_TO_OWN`.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReactionSetRequest"
+      responses:
+        "200":
+          description: Текущее состояние реакций
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReactionState"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [feed]
+      operationId: feedReactionsDelete
+      summary: Снятие реакции
+      responses:
+        "204":
+          description: Реакция снята
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/feed/stream:
+    get:
+      tags: [feed]
+      operationId: feedStream
+      summary: Канал изменений ленты (SSE)
+      description: |
+        Необязательный канал. Присылает только признак изменения, содержимое клиент читает через `GET /feed`.
+        При разрыве или `503` клиент переходит на обновление раз в 30 секунд.
+      security:
+        - {}
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Поток событий `text/event-stream`, данные каждого события — `FeedStreamEvent`
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                contentMediaType: application/json
+                contentSchema:
+                  $ref: "#/components/schemas/FeedStreamEvent"
+              example: |
+                event: changed
+                data: {"event":"changed","scope":"feed"}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ----------------------------------------------------------- notifications
+  /api/v1/notifications/settings:
+    get:
+      tags: [notifications]
+      operationId: notificationsSettingsGet
+      summary: Настройки напоминаний
+      responses:
+        "200":
+          description: Текущие настройки
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      tags: [notifications]
+      operationId: notificationsSettingsUpdate
+      summary: Изменение настроек напоминаний
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationSettingsUpdate"
+      responses:
+        "200":
+          description: Обновлённые настройки
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationSettings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/notifications/activity:
+    put:
+      tags: [notifications]
+      operationId: notificationsActivitySet
+      summary: Напоминания по конкретной цели
+      description: Отключение действует и на уведомление в приложении, и на письмо (F_Rem_2).
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GoalReminder"
+      responses:
+        "200":
+          description: Настройка по цели сохранена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GoalReminder"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/notifications:
+    get:
+      tags: [notifications]
+      operationId: notificationsList
+      summary: Внутренние напоминания
+      description: |
+        Напоминание срабатывает один раз и только для активной цели (F_Rem_3, F_Rem_9).
+        `email_status=failed` — письмо не ушло, клиент показывает «Не удалось отправить письмо» (F_Rem_6).
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница напоминаний
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ------------------------------------------------------------------- audit
+  /api/v1/audit/events:
+    get:
+      tags: [audit]
+      operationId: auditEventsList
+      summary: Журнал операций
+      description: Только для внутренних сервисов, снаружи недоступен. Записи неизменяемы.
+      security:
+        - serviceToken: []
+      parameters:
+        - name: user_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: entity_type
+          in: query
+          schema:
+            $ref: "#/components/schemas/AuditEntityType"
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница событий
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEventPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    refreshCookie:
+      type: apiKey
+      in: cookie
+      name: refresh_token
+    serviceToken:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Повтор с тем же ключом возвращает результат первого запроса и не создаёт вторую запись
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: ETag из ответа на чтение цели — признак версии. При несовпадении → `409 VERSION_CONFLICT`
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    Cursor:
+      name: cursor
+      in: query
+      description: Непрозрачный курсор из `next_cursor` предыдущей страницы
+      schema:
+        type: string
+    GoalId:
+      name: goal_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    PublicationId:
+      name: publication_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  headers:
+    RefreshTokenCookie:
+      description: Refresh-токен в HttpOnly-cookie, живёт 30 дней
+      schema:
+        type: string
+      example: refresh_token=rt_8f2a; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/identity/auth; Max-Age=2592000
+    ETag:
+      description: Признак версии записи
+      schema:
+        type: string
+    RetryAfter:
+      description: Через сколько секунд можно повторить запрос
+      schema:
+        type: integer
+        minimum: 1
+
+  responses:
+    BadRequest:
+      description: Некорректный запрос
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INVALID_EMAIL
+            message: Некорректный адрес
+            field: email
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    Unauthorized:
+      description: Нет доступа или неверные учётные данные
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: UNAUTHORIZED
+            message: Сеанс завершён, войдите снова
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    Forbidden:
+      description: Действие запрещено
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: FORBIDDEN
+            message: Недостаточно прав
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    NotFound:
+      description: Объект не найден
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: NOT_FOUND
+            message: Не найдено
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    Conflict:
+      description: Конфликт с текущим состоянием
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: EMAIL_TAKEN
+            message: Этот e-mail уже зарегистрирован
+            field: email
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    Gone:
+      description: Срок действия истёк
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: RESET_TOKEN_EXPIRED
+            message: Срок действия ссылки истёк, запросите код ещё раз
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    UnprocessableEntity:
+      description: Ошибка валидации, `field` указывает на поле формы
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: REQUIRED_FIELD
+            message: Заполните поле
+            field: title
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    TooManyRequests:
+      description: Превышена частота запросов
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: TOO_MANY_REQUESTS
+            message: Новый код можно запросить не чаще одного раза в 5 минут
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InternalError:
+      description: Внутренняя ошибка, детали клиенту не раскрываются
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: INTERNAL_ERROR
+            message: Что-то пошло не так, попробуйте позже
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    ServiceUnavailable:
+      description: Сервис временно недоступен
+      headers:
+        Retry-After:
+          $ref: "#/components/headers/RetryAfter"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            code: AVATARS_UNAVAILABLE
+            message: Набор аватаров временно недоступен
+            field: null
+            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+
+  schemas:
+    # ------------------------------------------------------------ общие
+    Error:
+      type: object
+      description: Единый конверт ошибки для всех доменов
+      required: [code, message, request_id]
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          description: Сообщение для пользователя
+        field:
+          type: [string, "null"]
+          description: Поле запроса, к которому относится ошибка (F_Common_4)
+        request_id:
+          type: string
+          description: Значение `X-Request-Id` для поиска в логах
+
+    ErrorCode:
+      type: string
+      enum:
+        # общие
+        - UNAUTHORIZED
+        - FORBIDDEN
+        - NOT_FOUND
+        - REQUIRED_FIELD
+        - TOO_MANY_REQUESTS
+        - INTERNAL_ERROR
+        - CONFIRM_REQUIRED
+        - VERSION_CONFLICT
+        # identity
+        - INVALID_EMAIL
+        - WEAK_PASSWORD
+        - EMAIL_TAKEN
+        - INVALID_CODE
+        - USER_NOT_FOUND
+        - INVALID_PASSWORD
+        - REFRESH_INVALID
+        - RESET_TOKEN_INVALID
+        - RESET_TOKEN_EXPIRED
+        # profiles
+        - NICKNAME_INVALID
+        - AVATAR_INVALID
+        - AVATARS_UNAVAILABLE
+        - PROFILE_NOT_FOUND
+        # goals
+        - TITLE_LENGTH
+        - TEXT_TOO_LONG
+        - GOAL_LOCKED
+        - INVALID_STATUS
+        - INVALID_STATUS_TRANSITION
+        - REFLECTION_LOCKED
+        - FACT_REQUIRED
+        - INVALID_SCORE
+        # feed
+        - INVALID_SORT
+        - INVALID_RESULT
+        - REFLECTION_REQUIRED
+        - DRAFT_NOT_PUBLISHABLE
+        - ALREADY_PUBLISHED
+        - INVALID_REACTION
+        - CANNOT_REACT_TO_OWN
+        - STREAM_UNAVAILABLE
+        # notifications
+        - INVALID_REMIND_AFTER_DAYS
+        - GOAL_ID_REQUIRED
+
+    NextCursor:
+      type: [string, "null"]
+      description: Курсор следующей страницы, `null` — страниц больше нет
+      examples: [eyJpZCI6IjEyMyJ9]
+
+    Email:
+      type: string
+      format: email
+      maxLength: 254
+      examples: [user@example.com]
+
+    Password:
+      type: string
+      description: 8–32 символа ASCII, минимум одна цифра и одна заглавная буква (F_Auth_7)
+      minLength: 8
+      maxLength: 32
+      pattern: "^(?=.*[0-9])(?=.*[A-Z])[\\x21-\\x7E]{8,32}$"
+      examples: [Secret123]
+
+    Code:
+      type: string
+      description: Шестизначный код из письма
+      pattern: "^[0-9]{6}$"
+      examples: ["123456"]
+
+    UserId:
+      type: string
+      format: uuid
+      examples: [550e8400-e29b-41d4-a716-446655440000]
+
+    AvatarId:
+      type: string
+      examples: [avatar_03]
+
+    Timestamp:
+      type: string
+      format: date-time
+      examples: ["2026-10-07T12:00:00Z"]
+
+    ConfirmRequest:
+      type: object
+      required: [confirm]
+      properties:
+        confirm:
+          type: boolean
+          const: true
+
+    # ---------------------------------------------------------- identity
+    RegisterRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          $ref: "#/components/schemas/Password"
+
+    RegisterResponse:
+      type: object
+      required: [user_id, email, created_at, email_confirmation_sent, email_confirmation_expires_in]
+      properties:
+        user_id:
+          $ref: "#/components/schemas/UserId"
+        email:
+          $ref: "#/components/schemas/Email"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        email_confirmation_sent:
+          type: boolean
+          examples: [true]
+        email_confirmation_expires_in:
+          type: integer
+          description: Срок действия кода, секунды
+          examples: [600]
+
+    EmailRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+
+    EmailCodeRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        code:
+          $ref: "#/components/schemas/Code"
+
+    EmailConfirmResponse:
+      type: object
+      required: [email_confirmed]
+      properties:
+        email_confirmed:
+          type: boolean
+          examples: [true]
+
+    EmailConfirmationSent:
+      type: object
+      required: [email_confirmation_sent, email_confirmation_expires_in]
+      properties:
+        email_confirmation_sent:
+          type: boolean
+          examples: [true]
+        email_confirmation_expires_in:
+          type: integer
+          examples: [600]
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          $ref: "#/components/schemas/Email"
+        password:
+          type: string
+          examples: [Secret123]
+
+    AccessToken:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          examples: [eyJhbGciOiJIUzI1NiJ9.e30.signature]
+        token_type:
+          type: string
+          const: Bearer
+        expires_in:
+          type: integer
+          description: Время жизни access-токена, секунды
+          examples: [3600]
+
+    LoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/AccessToken"
+        - type: object
+          required: [user_id, email, email_confirmed]
+          properties:
+            user_id:
+              $ref: "#/components/schemas/UserId"
+            email:
+              $ref: "#/components/schemas/Email"
+            email_confirmed:
+              type: boolean
+              examples: [true]
+
+    CodeSent:
+      type: object
+      required: [code_sent, expires_in]
+      properties:
+        code_sent:
+          type: boolean
+          examples: [true]
+        expires_in:
+          type: integer
+          examples: [600]
+
+    ResetToken:
+      type: object
+      required: [reset_token, expires_in]
+      properties:
+        reset_token:
+          type: string
+          examples: [rst_9b1c2d3e4f]
+        expires_in:
+          type: integer
+          examples: [600]
+
+    PasswordResetRequest:
+      type: object
+      required: [reset_token, new_password]
+      properties:
+        reset_token:
+          type: string
+        new_password:
+          $ref: "#/components/schemas/Password"
+
+    CurrentUser:
+      type: object
+      required: [user_id, email, email_confirmed, created_at]
+      properties:
+        user_id:
+          $ref: "#/components/schemas/UserId"
+        email:
+          $ref: "#/components/schemas/Email"
+        email_confirmed:
+          type: boolean
+          examples: [true]
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+
+    # ---------------------------------------------------------- profiles
+    PublicStats:
+      type: object
+      required: [goals_created, results_published]
+      properties:
+        goals_created:
+          type: integer
+          minimum: 0
+          examples: [12]
+        results_published:
+          type: integer
+          minimum: 0
+          examples: [5]
+
+    MyStats:
+      allOf:
+        - $ref: "#/components/schemas/PublicStats"
+        - type: object
+          required: [average_self_score]
+          properties:
+            average_self_score:
+              type: number
+              description: Средняя самооценка по завершённым целям, один знак после запятой; 0.0 если их нет
+              minimum: 0
+              maximum: 10
+              examples: [7.4]
+
+    MyProfile:
+      type: object
+      required: [user_id, nickname, email, email_visible_to_others, avatar_id, registered_at, stats]
+      properties:
+        user_id:
+          $ref: "#/components/schemas/UserId"
+        nickname:
+          type: string
+          examples: [nick]
+        email:
+          $ref: "#/components/schemas/Email"
+        email_visible_to_others:
+          type: boolean
+          examples: [false]
+        avatar_id:
+          $ref: "#/components/schemas/AvatarId"
+        registered_at:
+          $ref: "#/components/schemas/Timestamp"
+        stats:
+          $ref: "#/components/schemas/MyStats"
+
+    PublicProfile:
+      type: object
+      required: [user_id, nickname, avatar_id, registered_at, stats]
+      properties:
+        user_id:
+          $ref: "#/components/schemas/UserId"
+        nickname:
+          type: string
+          examples: [nick]
+        avatar_id:
+          $ref: "#/components/schemas/AvatarId"
+        registered_at:
+          $ref: "#/components/schemas/Timestamp"
+        stats:
+          $ref: "#/components/schemas/PublicStats"
+
+    ProfileUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        nickname:
+          type: string
+          minLength: 2
+          maxLength: 30
+          examples: [new_nick]
+        avatar_id:
+          $ref: "#/components/schemas/AvatarId"
+        email:
+          $ref: "#/components/schemas/Email"
+
+    PasswordChangeRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          examples: [Old12345]
+        new_password:
+          $ref: "#/components/schemas/Password"
+
+    Avatar:
+      type: object
+      required: [avatar_id, url, version]
+      properties:
+        avatar_id:
+          $ref: "#/components/schemas/AvatarId"
+        url:
+          type: string
+          examples: [/api/v1/profiles/avatars/avatar_03]
+        version:
+          type: integer
+          examples: [3]
+
+    AvatarList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Avatar"
+
+    AccountDeleted:
+      type: object
+      required: [deleted_at, feed_cleanup_deadline]
+      properties:
+        deleted_at:
+          $ref: "#/components/schemas/Timestamp"
+        feed_cleanup_deadline:
+          $ref: "#/components/schemas/Timestamp"
+
+    # ------------------------------------------------------------- goals
+    GoalStatus:
+      type: string
+      enum: [draft, active, completed]
+
+    ReflectionResult:
+      type: string
+      description: "`came_true` — сбылось, `partially` — частично, `failed` — не сбылось (F_Ref_1)"
+      enum: [came_true, partially, failed]
+
+    GoalTitle:
+      type: string
+      minLength: 3
+      maxLength: 100
+      examples: [Научиться играть на гитаре]
+
+    GoalText:
+      type: string
+      description: «Цель/план»
+      minLength: 1
+      maxLength: 5000
+      examples: [Хочу играть любимые песни для друзей]
+
+    PathText:
+      type: string
+      description: «Путь достижения», Markdown
+      minLength: 1
+      maxLength: 5000
+      examples: ["## План\n1. Аккорды\n2. Бой"]
+
+    ExpectedResult:
+      type: string
+      description: Ожидаемый результат цели (F_Goal_15)
+      minLength: 1
+      maxLength: 500
+      examples: [первая песня целиком к 1 марта]
+
+    GoalCreateRequest:
+      type: object
+      required: [title, goal_text, path_text, planned_end_at, expected_result]
+      properties:
+        title:
+          $ref: "#/components/schemas/GoalTitle"
+        goal_text:
+          $ref: "#/components/schemas/GoalText"
+        path_text:
+          $ref: "#/components/schemas/PathText"
+        publish:
+          type: boolean
+          default: false
+          description: "`false` — черновик, `true` — сразу активная цель"
+        planned_end_at:
+          type: string
+          format: date-time
+          description: Плановая дата завершения, в будущем (F_Goal_14)
+          examples: ["2027-01-01T00:00:00Z"]
+        expected_result:
+          $ref: "#/components/schemas/ExpectedResult"
+
+    GoalCreated:
+      type: object
+      required: [goal_id, status, created_at, planned_end_at, expected_result]
+      properties:
+        goal_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/GoalStatus"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        planned_end_at:
+          $ref: "#/components/schemas/Timestamp"
+        expected_result:
+          $ref: "#/components/schemas/ExpectedResult"
+
+    GoalUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        title:
+          $ref: "#/components/schemas/GoalTitle"
+        goal_text:
+          $ref: "#/components/schemas/GoalText"
+        path_text:
+          $ref: "#/components/schemas/PathText"
+        planned_end_at:
+          type: string
+          format: date-time
+        expected_result:
+          $ref: "#/components/schemas/ExpectedResult"
+
+    GoalListItem:
+      type: object
+      required: [goal_id, title, status, created_at, planned_end_at, average_self_score]
+      properties:
+        goal_id:
+          type: string
+          format: uuid
+        title:
+          $ref: "#/components/schemas/GoalTitle"
+        status:
+          $ref: "#/components/schemas/GoalStatus"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        planned_end_at:
+          $ref: "#/components/schemas/Timestamp"
+        average_self_score:
+          type: [number, "null"]
+          examples: [7.4]
+
+    GoalList:
+      type: object
+      required: [items, next_cursor, empty]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GoalListItem"
+        next_cursor:
+          $ref: "#/components/schemas/NextCursor"
+        empty:
+          type: boolean
+          description: "`true`, если у пользователя нет целей — клиент показывает заглушку"
+          examples: [false]
+
+    Reflection:
+      type: object
+      description: Итог цели, задаётся один раз (F_Ref_5)
+      required: [result, self_score, reflected_at]
+      properties:
+        result:
+          $ref: "#/components/schemas/ReflectionResult"
+        fact_text:
+          type: [string, "null"]
+          maxLength: 3000
+          examples: [Пробежал 10 км из 12]
+        self_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+          examples: [7]
+        reflected_at:
+          $ref: "#/components/schemas/Timestamp"
+        publication_id:
+          type: [string, "null"]
+          format: uuid
+
+    Goal:
+      type: object
+      required: [goal_id, title, goal_text, path_text, status, created_at, planned_end_at, expected_result]
+      properties:
+        goal_id:
+          type: string
+          format: uuid
+        title:
+          $ref: "#/components/schemas/GoalTitle"
+        goal_text:
+          $ref: "#/components/schemas/GoalText"
+        path_text:
+          $ref: "#/components/schemas/PathText"
+        status:
+          $ref: "#/components/schemas/GoalStatus"
+        created_at:
+          $ref: "#/components/schemas/Timestamp"
+        planned_end_at:
+          $ref: "#/components/schemas/Timestamp"
+        expected_result:
+          $ref: "#/components/schemas/ExpectedResult"
+        reflection:
+          description: Есть только у завершённой цели
+          $ref: "#/components/schemas/Reflection"
+
+    ReflectionInput:
+      type: object
+      required: [result, self_score]
+      properties:
+        result:
+          $ref: "#/components/schemas/ReflectionResult"
+        fact_text:
+          type: string
+          description: Обязателен при `partially` и `failed` (F_Ref_2)
+          maxLength: 3000
+        self_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Самооценка (F_Ref_3)
+        publish_to_feed:
+          type: boolean
+          default: false
+          description: Сразу создать публикацию в ленте (F_Feed_4)
+      if:
+        properties:
+          result:
+            enum: [partially, failed]
+      then:
+        required: [fact_text]
+
+    GoalStatusUpdateRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, completed]
+        reflection:
+          $ref: "#/components/schemas/ReflectionInput"
+      if:
+        properties:
+          status:
+            const: completed
+      then:
+        required: [reflection]
+
+    GoalStatusUpdated:
+      type: object
+      required: [goal_id, status, updated_at]
+      properties:
+        goal_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/GoalStatus"
+        updated_at:
+          $ref: "#/components/schemas/Timestamp"
+        reflection:
+          $ref: "#/components/schemas/Reflection"
+
+    # -------------------------------------------------------------- feed
+    ReactionType:
+      type: string
+      enum: [support, energy]
+
+    ReactionCounts:
+      type: object
+      required: [support, energy]
+      properties:
+        support:
+          type: integer
+          minimum: 0
+          examples: [12]
+        energy:
+          type: integer
+          minimum: 0
+          examples: [4]
+
+    Author:
+      type: object
+      required: [user_id, nickname, avatar_id]
+      properties:
+        user_id:
+          $ref: "#/components/schemas/UserId"
+        nickname:
+          type: string
+          examples: [nick]
+        avatar_id:
+          $ref: "#/components/schemas/AvatarId"
+
+    FeedItem:
+      type: object
+      required:
+        - publication_id
+        - author
+        - published_at
+        - title
+        - text
+        - expected_result
+        - result
+        - self_score
+        - reactions
+        - reactions_total
+        - my_reaction
+      properties:
+        publication_id:
+          type: string
+          format: uuid
+        author:
+          $ref: "#/components/schemas/Author"
+        published_at:
+          $ref: "#/components/schemas/Timestamp"
+        title:
+          type: string
+          examples: [Пробежать полумарафон за 3 месяца]
+        text:
+          type: string
+          examples: [Пробежал 10 км из 12, но втянулся в бег]
+        expected_result:
+          $ref: "#/components/schemas/ExpectedResult"
+        result:
+          $ref: "#/components/schemas/ReflectionResult"
+        self_score:
+          type: integer
+          minimum: 1
+          maximum: 10
+          examples: [7]
+        reactions:
+          $ref: "#/components/schemas/ReactionCounts"
+        reactions_total:
+          type: integer
+          minimum: 0
+          examples: [16]
+        my_reaction:
+          description: Реакция текущего читателя; `null` для анонимного читателя или без реакции
+          oneOf:
+            - $ref: "#/components/schemas/ReactionType"
+            - type: "null"
+
+    FeedPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FeedItem"
+        next_cursor:
+          $ref: "#/components/schemas/NextCursor"
+
+    FeedStreamEvent:
+      type: object
+      required: [event, scope]
+      properties:
+        event:
+          type: string
+          const: changed
+        scope:
+          type: string
+          examples: [feed]
+
+    PublicationCreateRequest:
+      type: object
+      required: [goal_id]
+      properties:
+        goal_id:
+          type: string
+          format: uuid
+
+    Visibility:
+      type: string
+      enum: [visible, hidden]
+
+    Publication:
+      type: object
+      required: [publication_id, goal_id, status, expected_result]
+      properties:
+        publication_id:
+          type: string
+          format: uuid
+        goal_id:
+          type: string
+          format: uuid
+        status:
+          $ref: "#/components/schemas/Visibility"
+        expected_result:
+          $ref: "#/components/schemas/ExpectedResult"
+
+    VisibilityUpdateRequest:
+      type: object
+      required: [visibility]
+      properties:
+        visibility:
+          $ref: "#/components/schemas/Visibility"
+
+    ReactionSetRequest:
+      type: object
+      required: [reaction]
+      properties:
+        reaction:
+          $ref: "#/components/schemas/ReactionType"
+
+    ReactionState:
+      type: object
+      required: [publication_id, my_reaction, reactions, reactions_total]
+      properties:
+        publication_id:
+          type: string
+          format: uuid
+        my_reaction:
+          description: "`null`, если повторный вызов с тем же типом снял реакцию"
+          oneOf:
+            - $ref: "#/components/schemas/ReactionType"
+            - type: "null"
+        reactions:
+          $ref: "#/components/schemas/ReactionCounts"
+        reactions_total:
+          type: integer
+          minimum: 0
+          examples: [17]
+
+    # ----------------------------------------------------- notifications
+    RemindAfterDays:
+      type: integer
+      minimum: 1
+      maximum: 365
+      examples: [3]
+
+    NotificationSettings:
+      type: object
+      required: [email_duplicate_enabled, default_remind_after_days]
+      properties:
+        email_duplicate_enabled:
+          type: boolean
+          description: Дублировать напоминания письмом, по умолчанию выключено (F_Rem_4)
+          examples: [false]
+        default_remind_after_days:
+          $ref: "#/components/schemas/RemindAfterDays"
+
+    NotificationSettingsUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        email_duplicate_enabled:
+          type: boolean
+        default_remind_after_days:
+          $ref: "#/components/schemas/RemindAfterDays"
+
+    GoalReminder:
+      type: object
+      required: [goal_id, enabled]
+      properties:
+        goal_id:
+          type: string
+          format: uuid
+        enabled:
+          type: boolean
+          description: По умолчанию напоминания включены (F_Rem_2)
+          examples: [false]
+        remind_after_days:
+          $ref: "#/components/schemas/RemindAfterDays"
+
+    EmailStatus:
+      type: string
+      enum: [sent, failed, not_requested]
+
+    Notification:
+      type: object
+      required: [notification_id, goal_id, scheduled_at, delivered_at, email_status]
+      properties:
+        notification_id:
+          type: string
+          format: uuid
+        goal_id:
+          type: string
+          format: uuid
+        scheduled_at:
+          $ref: "#/components/schemas/Timestamp"
+        delivered_at:
+          type: [string, "null"]
+          format: date-time
+        email_status:
+          $ref: "#/components/schemas/EmailStatus"
+
+    NotificationPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        next_cursor:
+          $ref: "#/components/schemas/NextCursor"
+
+    # ------------------------------------------------------------- audit
+    AuditEntityType:
+      type: string
+      enum: [goal, post, profile, session]
+
+    AuditEvent:
+      type: object
+      required: [event_id, entity_type, entity_id, operation, user_id, occurred_at, payload]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        entity_type:
+          $ref: "#/components/schemas/AuditEntityType"
+        entity_id:
+          type: string
+          format: uuid
+        operation:
+          type: string
+          enum: [create, update, delete]
+        user_id:
+          $ref: "#/components/schemas/UserId"
+        occurred_at:
+          $ref: "#/components/schemas/Timestamp"
+        payload:
+          type: object
+          additionalProperties: true
+
+    AuditEventPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditEvent"
+        next_cursor:
+          $ref: "#/components/schemas/NextCursor"

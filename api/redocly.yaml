@@ -1,0 +1,14 @@
+extends:
+  - recommended
+
+rules:
+  operation-4xx-response: error
+  operation-operationId-unique: error
+  no-unused-components: error
+  no-invalid-media-type-examples: error
+  security-defined: error
+  info-license: off
+  # В servers только локальный backend и mock-сервер, адреса окружений задаются при деплое.
+  no-server-example.com: off
+  # Ложное срабатывание на условную обязательность через if/then (fact_text, reflection).
+  no-required-schema-properties-undefined: off
