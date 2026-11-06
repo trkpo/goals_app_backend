@@ -981,7 +981,7 @@ components:
       name: If-Match
       in: header
       required: false
-      description: ETag из ответа на чтение цели — признак версии. При несовпадении → `409 VERSION_CONFLICT`
+      description: "ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Необязателен: без заголовка изменение выполняется без проверки версии (только автосохранение черновика)"
       schema:
         type: string
     Limit:
@@ -1178,6 +1178,8 @@ components:
         - INTERNAL_ERROR
         - CONFIRM_REQUIRED
         - VERSION_CONFLICT
+        - INVALID_CURSOR
+        - IDEMPOTENCY_CONFLICT
         # identity
         - INVALID_EMAIL
         - WEAK_PASSWORD
