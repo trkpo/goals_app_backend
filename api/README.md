@@ -49,9 +49,9 @@ const titleError = fieldError(error, "title");
 
 Пока frontend-проект пустой, пакет можно подключить копией каталога `api/` или зависимостью из git после того, как контракт уйдёт в отдельный пакет.
 
-## Решения, которые ждут задачу #1
+## Технические решения
 
-В `docs/API.md` их нет, в спецификации приняты временно:
+Зафиксированы в [ADR 0001](../docs/adr/0001-api-contract-decisions.md) и в приложении к [`docs/API.md`](../docs/API.md):
 
 - Конверт ошибки `{ code, message, field, request_id }`, `code` — из перечня `ErrorCode`.
 - Версия записи передаётся через `ETag` / `If-Match`, устаревшая правка — `409 VERSION_CONFLICT`.

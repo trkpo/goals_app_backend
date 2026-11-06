@@ -580,7 +580,7 @@ export interface components {
             request_id: string;
         };
         /** @enum {string} */
-        ErrorCode: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "REQUIRED_FIELD" | "TOO_MANY_REQUESTS" | "INTERNAL_ERROR" | "CONFIRM_REQUIRED" | "VERSION_CONFLICT" | "INVALID_EMAIL" | "WEAK_PASSWORD" | "EMAIL_TAKEN" | "INVALID_CODE" | "USER_NOT_FOUND" | "INVALID_PASSWORD" | "REFRESH_INVALID" | "RESET_TOKEN_INVALID" | "RESET_TOKEN_EXPIRED" | "NICKNAME_INVALID" | "AVATAR_INVALID" | "AVATARS_UNAVAILABLE" | "PROFILE_NOT_FOUND" | "TITLE_LENGTH" | "TEXT_TOO_LONG" | "GOAL_LOCKED" | "INVALID_STATUS" | "INVALID_STATUS_TRANSITION" | "REFLECTION_LOCKED" | "FACT_REQUIRED" | "INVALID_SCORE" | "INVALID_SORT" | "INVALID_RESULT" | "REFLECTION_REQUIRED" | "DRAFT_NOT_PUBLISHABLE" | "ALREADY_PUBLISHED" | "INVALID_REACTION" | "CANNOT_REACT_TO_OWN" | "STREAM_UNAVAILABLE" | "INVALID_REMIND_AFTER_DAYS" | "GOAL_ID_REQUIRED";
+        ErrorCode: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "REQUIRED_FIELD" | "TOO_MANY_REQUESTS" | "INTERNAL_ERROR" | "CONFIRM_REQUIRED" | "VERSION_CONFLICT" | "INVALID_CURSOR" | "IDEMPOTENCY_CONFLICT" | "INVALID_EMAIL" | "WEAK_PASSWORD" | "EMAIL_TAKEN" | "INVALID_CODE" | "USER_NOT_FOUND" | "INVALID_PASSWORD" | "REFRESH_INVALID" | "RESET_TOKEN_INVALID" | "RESET_TOKEN_EXPIRED" | "NICKNAME_INVALID" | "AVATAR_INVALID" | "AVATARS_UNAVAILABLE" | "PROFILE_NOT_FOUND" | "TITLE_LENGTH" | "TEXT_TOO_LONG" | "GOAL_LOCKED" | "INVALID_STATUS" | "INVALID_STATUS_TRANSITION" | "REFLECTION_LOCKED" | "FACT_REQUIRED" | "INVALID_SCORE" | "INVALID_SORT" | "INVALID_RESULT" | "REFLECTION_REQUIRED" | "DRAFT_NOT_PUBLISHABLE" | "ALREADY_PUBLISHED" | "INVALID_REACTION" | "CANNOT_REACT_TO_OWN" | "STREAM_UNAVAILABLE" | "INVALID_REMIND_AFTER_DAYS" | "GOAL_ID_REQUIRED";
         /**
          * @description Курсор следующей страницы, `null` — страниц больше нет
          * @example eyJpZCI6IjEyMyJ9
@@ -1191,7 +1191,7 @@ export interface components {
     parameters: {
         /** @description Повтор с тем же ключом возвращает результат первого запроса и не создаёт вторую запись */
         IdempotencyKey: string;
-        /** @description ETag из ответа на чтение цели — признак версии. При несовпадении → `409 VERSION_CONFLICT` */
+        /** @description ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Необязателен: без заголовка изменение выполняется без проверки версии (только автосохранение черновика) */
         IfMatch: string;
         Limit: number;
         /** @description Непрозрачный курсор из `next_cursor` предыдущей страницы */
@@ -1754,7 +1754,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description ETag из ответа на чтение цели — признак версии. При несовпадении → `409 VERSION_CONFLICT` */
+                /** @description ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Необязателен: без заголовка изменение выполняется без проверки версии (только автосохранение черновика) */
                 "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Повтор с тем же ключом возвращает результат первого запроса и не создаёт вторую запись */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
