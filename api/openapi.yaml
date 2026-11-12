@@ -14,8 +14,6 @@ info:
 servers:
   - url: http://localhost:8080
     description: Локальный backend
-  - url: http://localhost:4010
-    description: Mock-сервер Prism (`npm run mock` в каталоге `api`)
 
 tags:
   - name: identity
@@ -62,9 +60,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegisterResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidEmail:
+                  $ref: "#/components/examples/InvalidEmail"
+                WeakPassword:
+                  $ref: "#/components/examples/WeakPassword"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: Конфликт с текущим состоянием
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                EmailTaken:
+                  $ref: "#/components/examples/EmailTaken"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -93,9 +107,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmailConfirmResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidEmail:
+                  $ref: "#/components/examples/InvalidEmail"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidCode:
+                  $ref: "#/components/examples/InvalidCode"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -120,7 +148,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/EmailConfirmationSent"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidEmail:
+                  $ref: "#/components/examples/InvalidEmail"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -150,9 +185,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidEmail:
+                  $ref: "#/components/examples/InvalidEmail"
+                LoginRequiredField:
+                  $ref: "#/components/examples/LoginRequiredField"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Нет доступа или неверные учётные данные
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                UserNotFound:
+                  $ref: "#/components/examples/UserNotFound"
+                InvalidPassword:
+                  $ref: "#/components/examples/InvalidPassword"
         "429":
           $ref: "#/components/responses/TooManyRequests"
         "500":
@@ -177,7 +230,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/AccessToken"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Нет доступа или неверные учётные данные
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                RefreshInvalid:
+                  $ref: "#/components/examples/RefreshInvalid"
 
   /api/v1/identity/password/request:
     post:
@@ -201,7 +261,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/CodeSent"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidEmail:
+                  $ref: "#/components/examples/InvalidEmail"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -226,7 +293,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/ResetToken"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidRecoveryCode:
+                  $ref: "#/components/examples/InvalidRecoveryCode"
         "429":
           $ref: "#/components/responses/TooManyRequests"
 
@@ -247,9 +321,23 @@ paths:
         "204":
           description: Пароль изменён
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                WeakNewPassword:
+                  $ref: "#/components/examples/WeakNewPassword"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Нет доступа или неверные учётные данные
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                ResetTokenInvalid:
+                  $ref: "#/components/examples/ResetTokenInvalid"
         "410":
           $ref: "#/components/responses/Gone"
 
@@ -308,13 +396,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/MyProfile"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidEmail:
+                  $ref: "#/components/examples/InvalidEmail"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: Конфликт с текущим состоянием
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                EmailTaken:
+                  $ref: "#/components/examples/EmailTaken"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                NicknameInvalid:
+                  $ref: "#/components/examples/NicknameInvalid"
+                AvatarInvalid:
+                  $ref: "#/components/examples/AvatarInvalid"
         "429":
           $ref: "#/components/responses/TooManyRequests"
     delete:
@@ -340,7 +451,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/AccountDeleted"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                ConfirmRequired:
+                  $ref: "#/components/examples/ConfirmRequired"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -360,9 +478,25 @@ paths:
         "204":
           description: Пароль изменён
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                WeakNewPassword:
+                  $ref: "#/components/examples/WeakNewPassword"
         "401":
-          $ref: "#/components/responses/Unauthorized"
+          description: Нет доступа или неверные учётные данные
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidCurrentPassword:
+                  $ref: "#/components/examples/InvalidCurrentPassword"
+                Unauthorized:
+                  $ref: "#/components/examples/Unauthorized"
 
   /api/v1/profiles/avatars:
     get:
@@ -380,7 +514,17 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: Сервис временно недоступен
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                AvatarsUnavailable:
+                  $ref: "#/components/examples/AvatarsUnavailable"
 
   /api/v1/profiles/avatars/{avatar_id}:
     get:
@@ -418,7 +562,17 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: Сервис временно недоступен
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                AvatarsUnavailable:
+                  $ref: "#/components/examples/AvatarsUnavailable"
 
   /api/v1/profiles/{user_id}:
     get:
@@ -443,7 +597,14 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
-          $ref: "#/components/responses/NotFound"
+          description: Объект не найден
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                ProfileNotFound:
+                  $ref: "#/components/examples/ProfileNotFound"
 
   # ------------------------------------------------------------------- goals
   /api/v1/goals:
@@ -470,7 +631,18 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                RequiredField:
+                  $ref: "#/components/examples/RequiredField"
+                TitleLength:
+                  $ref: "#/components/examples/TitleLength"
+                TextTooLong:
+                  $ref: "#/components/examples/TextTooLong"
     get:
       tags: [goals]
       operationId: goalsList
@@ -501,8 +673,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GoalList"
-        "400":
-          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -565,9 +735,27 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: Конфликт с текущим состоянием
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                GoalLocked:
+                  $ref: "#/components/examples/GoalLocked"
+                VersionConflict:
+                  $ref: "#/components/examples/VersionConflict"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                TitleLength:
+                  $ref: "#/components/examples/TitleLength"
+                TextTooLong:
+                  $ref: "#/components/examples/TextTooLong"
     delete:
       tags: [goals]
       operationId: goalsDelete
@@ -585,7 +773,14 @@ paths:
         "204":
           description: Цель удалена
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                ConfirmRequired:
+                  $ref: "#/components/examples/ConfirmRequired"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -620,7 +815,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/GoalStatusUpdated"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidStatus:
+                  $ref: "#/components/examples/InvalidStatus"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -628,9 +830,29 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: Конфликт с текущим состоянием
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidStatusTransition:
+                  $ref: "#/components/examples/InvalidStatusTransition"
+                ReflectionLocked:
+                  $ref: "#/components/examples/ReflectionLocked"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                FactRequired:
+                  $ref: "#/components/examples/FactRequired"
+                InvalidScore:
+                  $ref: "#/components/examples/InvalidScore"
+                FactTooLong:
+                  $ref: "#/components/examples/FactTooLong"
 
   # -------------------------------------------------------------------- feed
   /api/v1/feed:
@@ -666,7 +888,16 @@ paths:
               schema:
                 $ref: "#/components/schemas/FeedPage"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidSort:
+                  $ref: "#/components/examples/InvalidSort"
+                InvalidResult:
+                  $ref: "#/components/examples/InvalidResult"
 
   /api/v1/feed/publications:
     post:
@@ -697,7 +928,18 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: Конфликт с текущим состоянием
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                ReflectionRequired:
+                  $ref: "#/components/examples/ReflectionRequired"
+                DraftNotPublishable:
+                  $ref: "#/components/examples/DraftNotPublishable"
+                AlreadyPublished:
+                  $ref: "#/components/examples/AlreadyPublished"
 
   /api/v1/feed/publications/{publication_id}:
     parameters:
@@ -771,11 +1013,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReactionState"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: Некорректный запрос
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidReaction:
+                  $ref: "#/components/examples/InvalidReaction"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: Действие запрещено
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                CannotReactToOwn:
+                  $ref: "#/components/examples/CannotReactToOwn"
         "404":
           $ref: "#/components/responses/NotFound"
     delete:
@@ -817,7 +1073,17 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "503":
-          $ref: "#/components/responses/ServiceUnavailable"
+          description: Сервис временно недоступен
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                StreamUnavailable:
+                  $ref: "#/components/examples/StreamUnavailable"
 
   # ----------------------------------------------------------- notifications
   /api/v1/notifications/settings:
@@ -856,7 +1122,14 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidRemindAfterDays:
+                  $ref: "#/components/examples/InvalidRemindAfterDays"
 
   /api/v1/notifications/activity:
     put:
@@ -886,7 +1159,16 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "422":
-          $ref: "#/components/responses/UnprocessableEntity"
+          description: Ошибка валидации, `field` указывает на поле формы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidRemindAfterDays:
+                  $ref: "#/components/examples/InvalidRemindAfterDays"
+                GoalIdRequired:
+                  $ref: "#/components/examples/GoalIdRequired"
 
   /api/v1/notifications:
     get:
@@ -947,8 +1229,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuditEventPage"
-        "400":
-          $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
 
@@ -1029,18 +1309,282 @@ components:
         type: integer
         minimum: 1
 
+  examples:
+    InvalidEmail:
+      summary: INVALID_EMAIL
+      value:
+        code: INVALID_EMAIL
+        message: "Некорректный адрес"
+        field: email
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    WeakPassword:
+      summary: WEAK_PASSWORD
+      value:
+        code: WEAK_PASSWORD
+        message: "Пароль: 8–32 символа ASCII, минимум одна цифра и одна заглавная буква"
+        field: password
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    EmailTaken:
+      summary: EMAIL_TAKEN
+      value:
+        code: EMAIL_TAKEN
+        message: "Этот e-mail уже зарегистрирован"
+        field: email
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidCode:
+      summary: INVALID_CODE
+      value:
+        code: INVALID_CODE
+        message: "Код подтверждения некорректный"
+        field: code
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    LoginRequiredField:
+      summary: REQUIRED_FIELD
+      value:
+        code: REQUIRED_FIELD
+        message: "Заполните поле"
+        field: password
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    UserNotFound:
+      summary: USER_NOT_FOUND
+      value:
+        code: USER_NOT_FOUND
+        message: "Пользователь с таким e-mail не найден"
+        field: email
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidPassword:
+      summary: INVALID_PASSWORD
+      value:
+        code: INVALID_PASSWORD
+        message: "Неверный пароль"
+        field: password
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    RefreshInvalid:
+      summary: REFRESH_INVALID
+      value:
+        code: REFRESH_INVALID
+        message: "Сеанс завершён, войдите снова"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidRecoveryCode:
+      summary: INVALID_CODE
+      value:
+        code: INVALID_CODE
+        message: "Код восстановления некорректный"
+        field: code
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    WeakNewPassword:
+      summary: WEAK_PASSWORD
+      value:
+        code: WEAK_PASSWORD
+        message: "Пароль: 8–32 символа ASCII, минимум одна цифра и одна заглавная буква"
+        field: new_password
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    ResetTokenInvalid:
+      summary: RESET_TOKEN_INVALID
+      value:
+        code: RESET_TOKEN_INVALID
+        message: "Ссылка для смены пароля недействительна"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    NicknameInvalid:
+      summary: NICKNAME_INVALID
+      value:
+        code: NICKNAME_INVALID
+        message: "Ник должен быть от 2 до 30 символов"
+        field: nickname
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    AvatarInvalid:
+      summary: AVATAR_INVALID
+      value:
+        code: AVATAR_INVALID
+        message: "Выберите аватар из списка"
+        field: avatar_id
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    ConfirmRequired:
+      summary: CONFIRM_REQUIRED
+      value:
+        code: CONFIRM_REQUIRED
+        message: "Подтвердите действие"
+        field: confirm
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidCurrentPassword:
+      summary: INVALID_PASSWORD
+      value:
+        code: INVALID_PASSWORD
+        message: "Неверный пароль"
+        field: current_password
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    Unauthorized:
+      summary: UNAUTHORIZED
+      value:
+        code: UNAUTHORIZED
+        message: "Сеанс завершён, войдите снова"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    AvatarsUnavailable:
+      summary: AVATARS_UNAVAILABLE
+      value:
+        code: AVATARS_UNAVAILABLE
+        message: "Набор аватаров временно недоступен"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    ProfileNotFound:
+      summary: PROFILE_NOT_FOUND
+      value:
+        code: PROFILE_NOT_FOUND
+        message: "Профиль не найден"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    RequiredField:
+      summary: REQUIRED_FIELD
+      value:
+        code: REQUIRED_FIELD
+        message: "Заполните поле"
+        field: title
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    TitleLength:
+      summary: TITLE_LENGTH
+      value:
+        code: TITLE_LENGTH
+        message: "Название должно быть от 3 до 100 символов"
+        field: title
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    TextTooLong:
+      summary: TEXT_TOO_LONG
+      value:
+        code: TEXT_TOO_LONG
+        message: "Текст не должен превышать 5000 символов"
+        field: goal_text
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    GoalLocked:
+      summary: GOAL_LOCKED
+      value:
+        code: GOAL_LOCKED
+        message: "Цель уже запущена, её текст менять нельзя"
+        field: goal_text
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    VersionConflict:
+      summary: VERSION_CONFLICT
+      value:
+        code: VERSION_CONFLICT
+        message: "Цель изменена в другом месте, обновите страницу"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidStatus:
+      summary: INVALID_STATUS
+      value:
+        code: INVALID_STATUS
+        message: "Недопустимый статус"
+        field: status
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidStatusTransition:
+      summary: INVALID_STATUS_TRANSITION
+      value:
+        code: INVALID_STATUS_TRANSITION
+        message: "Недопустимый переход статуса"
+        field: status
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    ReflectionLocked:
+      summary: REFLECTION_LOCKED
+      value:
+        code: REFLECTION_LOCKED
+        message: "Итог уже сохранён, изменить его нельзя"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    FactRequired:
+      summary: FACT_REQUIRED
+      value:
+        code: FACT_REQUIRED
+        message: "Опишите, что произошло"
+        field: fact_text
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidScore:
+      summary: INVALID_SCORE
+      value:
+        code: INVALID_SCORE
+        message: "Оценка — целое число от 1 до 10"
+        field: self_score
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    FactTooLong:
+      summary: TEXT_TOO_LONG
+      value:
+        code: TEXT_TOO_LONG
+        message: "Текст итога не должен превышать 3000 символов"
+        field: fact_text
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidSort:
+      summary: INVALID_SORT
+      value:
+        code: INVALID_SORT
+        message: "Недопустимая сортировка"
+        field: sort
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidResult:
+      summary: INVALID_RESULT
+      value:
+        code: INVALID_RESULT
+        message: "Недопустимый тип итога"
+        field: result
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    ReflectionRequired:
+      summary: REFLECTION_REQUIRED
+      value:
+        code: REFLECTION_REQUIRED
+        message: "Сначала подведите итог цели"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    DraftNotPublishable:
+      summary: DRAFT_NOT_PUBLISHABLE
+      value:
+        code: DRAFT_NOT_PUBLISHABLE
+        message: "Черновик или активную цель опубликовать нельзя"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    AlreadyPublished:
+      summary: ALREADY_PUBLISHED
+      value:
+        code: ALREADY_PUBLISHED
+        message: "Итог уже опубликован"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidReaction:
+      summary: INVALID_REACTION
+      value:
+        code: INVALID_REACTION
+        message: "Недопустимая реакция"
+        field: reaction
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    CannotReactToOwn:
+      summary: CANNOT_REACT_TO_OWN
+      value:
+        code: CANNOT_REACT_TO_OWN
+        message: "Нельзя поставить реакцию на свою публикацию"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    StreamUnavailable:
+      summary: STREAM_UNAVAILABLE
+      value:
+        code: STREAM_UNAVAILABLE
+        message: "Канал обновлений недоступен, лента обновляется раз в 30 секунд"
+        field: null
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    InvalidRemindAfterDays:
+      summary: INVALID_REMIND_AFTER_DAYS
+      value:
+        code: INVALID_REMIND_AFTER_DAYS
+        message: "Укажите число дней от 1 до 365"
+        field: remind_after_days
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+    GoalIdRequired:
+      summary: GOAL_ID_REQUIRED
+      value:
+        code: GOAL_ID_REQUIRED
+        message: "Не указана цель"
+        field: goal_id
+        request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
+
   responses:
-    BadRequest:
-      description: Некорректный запрос
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            code: INVALID_EMAIL
-            message: Некорректный адрес
-            field: email
-            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
     Unauthorized:
       description: Нет доступа или неверные учётные данные
       content:
@@ -1074,17 +1618,6 @@ components:
             message: Не найдено
             field: null
             request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
-    Conflict:
-      description: Конфликт с текущим состоянием
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            code: EMAIL_TAKEN
-            message: Этот e-mail уже зарегистрирован
-            field: email
-            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
     Gone:
       description: Срок действия истёк
       content:
@@ -1095,17 +1628,6 @@ components:
             code: RESET_TOKEN_EXPIRED
             message: Срок действия ссылки истёк, запросите код ещё раз
             field: null
-            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
-    UnprocessableEntity:
-      description: Ошибка валидации, `field` указывает на поле формы
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            code: REQUIRED_FIELD
-            message: Заполните поле
-            field: title
             request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
     TooManyRequests:
       description: Превышена частота запросов
@@ -1130,20 +1652,6 @@ components:
           example:
             code: INTERNAL_ERROR
             message: Что-то пошло не так, попробуйте позже
-            field: null
-            request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
-    ServiceUnavailable:
-      description: Сервис временно недоступен
-      headers:
-        Retry-After:
-          $ref: "#/components/headers/RetryAfter"
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/Error"
-          example:
-            code: AVATARS_UNAVAILABLE
-            message: Набор аватаров временно недоступен
             field: null
             request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
 
@@ -1812,7 +2320,8 @@ components:
           type: string
           examples: [Пробежать полумарафон за 3 месяца]
         text:
-          type: string
+          type: [string, "null"]
+          description: Текст итога; `null`, если результат «Сбылось» и текст не вводили
           examples: [Пробежал 10 км из 12, но втянулся в бег]
         expected_result:
           $ref: "#/components/schemas/ExpectedResult"
