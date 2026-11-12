@@ -14,43 +14,61 @@ export interface ApiClientOptions {
   /**
    * Вызывается при 401 на защищённом запросе. Должен обновить токен через
    * `POST /api/v1/identity/auth/refresh` и вернуть `true`, если это удалось.
+   * Параллельные запросы, получившие 401, ждут один общий вызов.
    */
   onUnauthorized?: () => Promise<boolean>;
 }
 
 const REFRESH_PATH = "/api/v1/identity/auth/refresh";
 
+/** Копия запроса до отправки: после `fetch` тело оригинала уже прочитано и повторить его нельзя. */
+interface Pending {
+  copy: Request;
+  token: string | null;
+}
+
 export function createApiClient(options: ApiClientOptions) {
   // Refresh-токен лежит в HttpOnly-cookie, поэтому запросы идут с credentials.
   const client = createClient<paths>({ baseUrl: options.baseUrl, credentials: "include" });
 
+  const pending = new WeakMap<Request, Pending>();
+  let refreshing: Promise<boolean> | null = null;
+
+  const refresh = (): Promise<boolean> => {
+    refreshing ??= options.onUnauthorized!().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
+  };
+
   const auth: Middleware = {
     onRequest({ request }) {
-      const token = options.getAccessToken?.();
+      const token = options.getAccessToken?.() ?? null;
       if (token && !request.headers.has("Authorization")) {
         request.headers.set("Authorization", `Bearer ${token}`);
+      }
+      if (options.onUnauthorized && new URL(request.url).pathname !== REFRESH_PATH) {
+        pending.set(request, { copy: request.clone(), token });
       }
       return request;
     },
     async onResponse({ request, response }) {
-      if (
-        response.status !== 401 ||
-        !options.onUnauthorized ||
-        new URL(request.url).pathname === REFRESH_PATH ||
-        request.headers.has("X-Retried")
-      ) {
+      const sent = pending.get(request);
+      pending.delete(request);
+      if (response.status !== 401 || !sent || !options.onUnauthorized) {
         return response;
       }
-      if (!(await options.onUnauthorized())) {
+      // Если токен уже обновил соседний запрос, повторяем с новым без лишнего refresh.
+      const current = options.getAccessToken?.() ?? null;
+      if (current === sent.token && !(await refresh())) {
         return response;
       }
-      const retry = new Request(request);
-      retry.headers.set("X-Retried", "1");
       const token = options.getAccessToken?.();
       if (token) {
-        retry.headers.set("Authorization", `Bearer ${token}`);
+        sent.copy.headers.set("Authorization", `Bearer ${token}`);
       }
-      return fetch(retry);
+      // Повтор идёт мимо middleware, поэтому второй раз на 401 не зациклится.
+      return fetch(sent.copy);
     },
   };
 
