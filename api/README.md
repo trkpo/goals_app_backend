@@ -5,14 +5,15 @@
 
 ## Команды
 
-Нужен Node.js 22.
+Нужен Node.js 22.18 или новее.
 
 ```bash
 cd api
 npm ci
 npm run lint       # валидация спецификации (Redocly)
 npm run generate   # пересобрать client/schema.d.ts
-npm run check      # всё сразу: lint, generate, typecheck
+npm test           # тесты клиента
+npm run check      # всё сразу: lint, generate, typecheck, test
 npm run mock       # mock-сервер на http://localhost:4010
 ```
 
@@ -24,7 +25,8 @@ Mock-сервер [Prism](https://docs.stoplight.io/docs/prism) отвечает
 
 - Запрос без `Authorization` к защищённому эндпоинту получает `401`.
 - Невалидное тело запроса получает `422`.
-- Нужный ответ можно запросить заголовком `Prefer: code=409`, случайные данные вместо примеров — `Prefer: dynamic=true`.
+- Нужный ответ можно запросить заголовком `Prefer: code=409`. Если у ошибки несколько примеров, выбрать конкретный можно так: `Prefer: code=409, example=VersionConflict`. Имена примеров лежат в `components.examples`; без `example` отдаётся первый из перечисленных у операции.
+- Случайные данные вместо примеров — `Prefer: dynamic=true`.
 
 Без Node.js сервер запускается так:
 
@@ -53,8 +55,19 @@ const titleError = fieldError(error, "title");
 
 В `docs/API.md` их нет, в спецификации приняты временно:
 
+- Для `text` в публикации ленты разрешён `null`: у итога «Сбылось» текст необязателен (F_Ref_2), как и `Reflection.fact_text`.
+- Ошибки некорректных `limit` и `cursor` в `API.md` не описаны, поэтому у `GET /goals` и `GET /audit/events` нет ответа `400`.
+
 - Конверт ошибки `{ code, message, field, request_id }`, `code` — из перечня `ErrorCode`.
 - Версия записи передаётся через `ETag` / `If-Match`, устаревшая правка — `409 VERSION_CONFLICT`.
 - `confirm` для `DELETE` передаётся в теле, как в `API.md`.
 - Фильтр `result` в ленте применяется к уже полученной странице, поэтому страница может быть короче `limit`.
 - Эндпоинт изображения аватара `GET /profiles/avatars/{avatar_id}` описан по ссылке `url` из списка аватаров.
+
+## Пробелы в `docs/API.md`
+
+Из ревью, в контракт не добавлены, потому что нужны решения по самому `API.md`:
+
+- Нет выхода (`logout`, F_Auth_10 и F_Auth_11). Refresh-cookie `HttpOnly`, клиент удалить её не может, поэтому после перезагрузки сеанс восстановится.
+- Нет подтверждения нового e-mail при смене адреса (F_Prof_4): `identity.email.confirm` относится к учётной записи. Не описан и ответ `PATCH /profiles/me` при смене адреса.
+- Не описан CORS для локальной разработки (SPA на `:5173`, API на `:8080`), понадобится в задаче #6.
