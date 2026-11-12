@@ -1,0 +1,34 @@
+# Локальный запуск: docker compose up --build
+# Только база для запуска из IDE: docker compose up -d db
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: goals
+      POSTGRES_USER: goals
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-goals}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goals -d goals"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      DB_URL: jdbc:postgresql://db:5432/goals
+      DB_USER: goals
+      DB_PASSWORD: ${DB_PASSWORD:-goals}
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  db-data:

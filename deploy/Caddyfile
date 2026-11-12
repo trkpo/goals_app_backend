@@ -1,0 +1,7 @@
+# Для доменного имени Caddy сам выпускает сертификат Let's Encrypt,
+# включает HTTPS и редирект с HTTP (NF_Sec_3).
+{$DOMAIN} {
+	encode gzip
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	reverse_proxy app:8080
+}

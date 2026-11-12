@@ -1,0 +1,28 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# Секреты и локальные настройки
+.env
+*.env
+!.env.example
+!deploy/*.env.example
+
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+.DS_Store
