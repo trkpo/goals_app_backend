@@ -12,6 +12,11 @@ spring:
   flyway:
     locations: classpath:db/migration
 
+logging:
+  pattern:
+    # request_id кладёт RequestIdFilter; вне запроса поле пустое
+    level: "%5p [%X{request_id:-}]"
+
 server:
   port: ${PORT:8080}
   forward-headers-strategy: framework
