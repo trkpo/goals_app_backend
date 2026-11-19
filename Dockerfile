@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jdk AS build
+FROM eclipse-temurin:25-jdk AS build
 WORKDIR /workspace
 COPY gradlew settings.gradle.kts build.gradle.kts ./
 COPY gradle gradle
@@ -7,7 +7,7 @@ COPY src src
 RUN ./gradlew --no-daemon bootJar -x test \
     && cp build/libs/*.jar app.jar
 
-FROM eclipse-temurin:21-jre
+FROM eclipse-temurin:25-jre
 RUN useradd --system --uid 10001 app
 WORKDIR /app
 COPY --from=build /workspace/app.jar app.jar
