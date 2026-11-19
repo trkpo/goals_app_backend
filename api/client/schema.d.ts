@@ -108,6 +108,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/identity/auth/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Выход из системы
+         * @description Отзывает refresh-токен текущего сеанса и удаляет cookie (F_Auth_10, F_Auth_11). Cookie `HttpOnly`,
+         *     клиент удалить её не может, поэтому выход выполняет сервер. Access-токен не нужен: выйти можно и после
+         *     его истечения. Операция идемпотентна: без cookie, с истёкшим или уже отозванным токеном ответ тот же
+         *     `204`, а cookie очищается. Выданный access-токен действует до конца срока, клиент забывает его сам.
+         */
+        post: operations["identityAuthLogout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/identity/password/request": {
         parameters: {
             query?: never;
@@ -206,10 +229,38 @@ export interface paths {
         head?: never;
         /**
          * Изменение профиля
-         * @description Передаются только изменяемые поля. Новый e-mail требует подтверждения кодом (F_Prof_4),
-         *     до подтверждения сохраняется прежний адрес.
+         * @description Передаются только изменяемые поля. Новый e-mail требует подтверждения кодом (F_Prof_4): адрес
+         *     не меняется сразу, а записывается как `pending_email`, код уходит на новый адрес. Ответ содержит
+         *     прежний `email`, `pending_email`, `email_confirmation_sent` и `email_confirmation_expires_in`;
+         *     завершает смену `POST /profiles/me/email/confirm`. Остальные поля тела применяются сразу.
+         *     Повторный запрос с тем же или другим новым адресом отправляет новый код, прежний перестаёт
+         *     действовать (F_Auth_15), не чаще раза в 5 минут (F_Auth_14) → `429 TOO_MANY_REQUESTS`.
+         *     Запрос с текущим адресом код не отправляет и сбрасывает `pending_email`.
          */
         patch: operations["profilesMeUpdate"];
+        trace?: never;
+    };
+    "/api/v1/profiles/me/email/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Подтверждение нового e-mail
+         * @description Подтверждает `pending_email` кодом, отправленным на новый адрес (F_Prof_4). Не путать с
+         *     `POST /identity/email/confirm`: тот подтверждает адрес при регистрации и работает без авторизации.
+         *     Код — 6 цифр, действует 10 минут, не более 3 проверок в минуту (F_Auth_13). При успехе `email`
+         *     заменяется на `pending_email`, сеансы сохраняются.
+         */
+        post: operations["profilesMeEmailConfirm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/profiles/me/password": {
@@ -713,11 +764,26 @@ export interface components {
             /** @example nick */
             nickname: string;
             email: components["schemas"]["Email"];
+            /** @description Новый адрес, ожидающий подтверждения кодом (F_Prof_4); `null`, если смена не начата */
+            pending_email: components["schemas"]["Email"] | null;
             /** @example false */
             email_visible_to_others: boolean;
             avatar_id: components["schemas"]["AvatarId"];
             registered_at: components["schemas"]["Timestamp"];
             stats: components["schemas"]["MyStats"];
+        };
+        /**
+         * @description Профиль после `PATCH`. Поля `email_confirmation_*` есть только когда запрос начал смену e-mail
+         *     и код отправлен.
+         */
+        MyProfileUpdated: components["schemas"]["MyProfile"] & {
+            /** @example true */
+            email_confirmation_sent?: boolean;
+            /** @example 600 */
+            email_confirmation_expires_in?: number;
+        };
+        ProfileEmailConfirmRequest: {
+            code: components["schemas"]["Code"];
         };
         PublicProfile: {
             user_id: components["schemas"]["UserId"];
@@ -1138,6 +1204,11 @@ export interface components {
          * @example refresh_token=rt_8f2a; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/identity/auth; Max-Age=2592000
          */
         RefreshTokenCookie: string;
+        /**
+         * @description Очистка refresh-cookie при выходе
+         * @example refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/identity/auth; Max-Age=0
+         */
+        ClearedRefreshTokenCookie: string;
         /** @description Признак версии записи */
         ETag: string;
         /** @description Через сколько секунд можно повторить запрос */
@@ -1346,6 +1417,27 @@ export interface operations {
             };
         };
     };
+    identityAuthLogout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сеанс завершён, cookie очищена */
+            204: {
+                headers: {
+                    "Set-Cookie": components["headers"]["ClearedRefreshTokenCookie"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            429: components["responses"]["TooManyRequests"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     identityPasswordRequest: {
         parameters: {
             query?: never;
@@ -1551,13 +1643,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Обновлённый профиль */
+            /** @description Обновлённый профиль; при смене e-mail — с признаками отправки кода */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MyProfile"];
+                    "application/json": components["schemas"]["MyProfileUpdated"];
                 };
             };
             /** @description Некорректный запрос */
@@ -1580,6 +1672,50 @@ export interface operations {
                 };
             };
             /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            429: components["responses"]["TooManyRequests"];
+        };
+    };
+    profilesMeEmailConfirm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProfileEmailConfirmRequest"];
+            };
+        };
+        responses: {
+            /** @description Адрес подтверждён и заменён */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyProfile"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Адрес за время ожидания занял другой пользователь */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Неверный или истёкший код, либо смена e-mail не начата */
             422: {
                 headers: {
                     [name: string]: unknown;

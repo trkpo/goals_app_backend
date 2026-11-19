@@ -11,6 +11,9 @@ info:
     - Все ошибки возвращаются в едином конверте `Error`.
     - Изменяющие операции принимают `Idempotency-Key`: повтор с тем же ключом возвращает результат первого запроса.
     - Ограничение частоты: `429 TOO_MANY_REQUESTS` с заголовком `Retry-After`.
+    - CORS: разрешены только origin из `CORS_ALLOWED_ORIGINS` (точное совпадение, без `*`), ответы содержат
+      `Access-Control-Allow-Credentials: true`, запросы `refresh` и `logout` отправляются с `credentials: "include"`.
+      Правила для локальной разработки, `dev` и `stage` — в `docs/API.md`, «Сквозные правила», п. 11.
 servers:
   - url: http://localhost:8080
     description: Локальный backend
@@ -239,6 +242,29 @@ paths:
                 RefreshInvalid:
                   $ref: "#/components/examples/RefreshInvalid"
 
+  /api/v1/identity/auth/logout:
+    post:
+      tags: [identity]
+      operationId: identityAuthLogout
+      summary: Выход из системы
+      description: |
+        Отзывает refresh-токен текущего сеанса и удаляет cookie (F_Auth_10, F_Auth_11). Cookie `HttpOnly`,
+        клиент удалить её не может, поэтому выход выполняет сервер. Access-токен не нужен: выйти можно и после
+        его истечения. Операция идемпотентна: без cookie, с истёкшим или уже отозванным токеном ответ тот же
+        `204`, а cookie очищается. Выданный access-токен действует до конца срока, клиент забывает его сам.
+      security:
+        - refreshCookie: []
+      responses:
+        "204":
+          description: Сеанс завершён, cookie очищена
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/ClearedRefreshTokenCookie"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/identity/password/request:
     post:
       tags: [identity]
@@ -378,8 +404,13 @@ paths:
       operationId: profilesMeUpdate
       summary: Изменение профиля
       description: |
-        Передаются только изменяемые поля. Новый e-mail требует подтверждения кодом (F_Prof_4),
-        до подтверждения сохраняется прежний адрес.
+        Передаются только изменяемые поля. Новый e-mail требует подтверждения кодом (F_Prof_4): адрес
+        не меняется сразу, а записывается как `pending_email`, код уходит на новый адрес. Ответ содержит
+        прежний `email`, `pending_email`, `email_confirmation_sent` и `email_confirmation_expires_in`;
+        завершает смену `POST /profiles/me/email/confirm`. Остальные поля тела применяются сразу.
+        Повторный запрос с тем же или другим новым адресом отправляет новый код, прежний перестаёт
+        действовать (F_Auth_15), не чаще раза в 5 минут (F_Auth_14) → `429 TOO_MANY_REQUESTS`.
+        Запрос с текущим адресом код не отправляет и сбрасывает `pending_email`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
@@ -390,11 +421,11 @@ paths:
               $ref: "#/components/schemas/ProfileUpdateRequest"
       responses:
         "200":
-          description: Обновлённый профиль
+          description: Обновлённый профиль; при смене e-mail — с признаками отправки кода
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/MyProfile"
+                $ref: "#/components/schemas/MyProfileUpdated"
         "400":
           description: Некорректный запрос
           content:
@@ -461,6 +492,52 @@ paths:
                   $ref: "#/components/examples/ConfirmRequired"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/profiles/me/email/confirm:
+    post:
+      tags: [profiles]
+      operationId: profilesMeEmailConfirm
+      summary: Подтверждение нового e-mail
+      description: |
+        Подтверждает `pending_email` кодом, отправленным на новый адрес (F_Prof_4). Не путать с
+        `POST /identity/email/confirm`: тот подтверждает адрес при регистрации и работает без авторизации.
+        Код — 6 цифр, действует 10 минут, не более 3 проверок в минуту (F_Auth_13). При успехе `email`
+        заменяется на `pending_email`, сеансы сохраняются.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileEmailConfirmRequest"
+      responses:
+        "200":
+          description: Адрес подтверждён и заменён
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MyProfile"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: Адрес за время ожидания занял другой пользователь
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                EmailTaken:
+                  $ref: "#/components/examples/EmailTaken"
+        "422":
+          description: Неверный или истёкший код, либо смена e-mail не начата
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                InvalidCode:
+                  $ref: "#/components/examples/InvalidCode"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
 
   /api/v1/profiles/me/password:
     put:
@@ -1299,6 +1376,11 @@ components:
       schema:
         type: string
       example: refresh_token=rt_8f2a; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/identity/auth; Max-Age=2592000
+    ClearedRefreshTokenCookie:
+      description: Очистка refresh-cookie при выходе
+      schema:
+        type: string
+      example: refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/identity/auth; Max-Age=0
     ETag:
       description: Признак версии записи
       schema:
@@ -1946,7 +2028,7 @@ components:
 
     MyProfile:
       type: object
-      required: [user_id, nickname, email, email_visible_to_others, avatar_id, registered_at, stats]
+      required: [user_id, nickname, email, pending_email, email_visible_to_others, avatar_id, registered_at, stats]
       properties:
         user_id:
           $ref: "#/components/schemas/UserId"
@@ -1955,6 +2037,11 @@ components:
           examples: [nick]
         email:
           $ref: "#/components/schemas/Email"
+        pending_email:
+          description: Новый адрес, ожидающий подтверждения кодом (F_Prof_4); `null`, если смена не начата
+          oneOf:
+            - $ref: "#/components/schemas/Email"
+            - type: "null"
         email_visible_to_others:
           type: boolean
           examples: [false]
@@ -1964,6 +2051,28 @@ components:
           $ref: "#/components/schemas/Timestamp"
         stats:
           $ref: "#/components/schemas/MyStats"
+
+    MyProfileUpdated:
+      description: |
+        Профиль после `PATCH`. Поля `email_confirmation_*` есть только когда запрос начал смену e-mail
+        и код отправлен.
+      allOf:
+        - $ref: "#/components/schemas/MyProfile"
+        - type: object
+          properties:
+            email_confirmation_sent:
+              type: boolean
+              examples: [true]
+            email_confirmation_expires_in:
+              type: integer
+              examples: [600]
+
+    ProfileEmailConfirmRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          $ref: "#/components/schemas/Code"
 
     PublicProfile:
       type: object
