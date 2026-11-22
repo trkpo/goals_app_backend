@@ -24,6 +24,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/goals
       DB_USER: goals
       DB_PASSWORD: ${DB_PASSWORD}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
     # Задан здесь явно, чтобы зависимость caddy от app не держалась на HEALTHCHECK из образа.
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/actuator/health/readiness"]

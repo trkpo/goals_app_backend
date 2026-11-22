@@ -24,6 +24,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/goals
       DB_USER: goals
       DB_PASSWORD: ${DB_PASSWORD:-goals}
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
     ports:
       - "8080:8080"
     depends_on:
