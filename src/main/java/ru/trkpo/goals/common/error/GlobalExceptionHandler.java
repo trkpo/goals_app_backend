@@ -37,7 +37,14 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     } else {
       log.debug("Ошибка {}: {}", code, ex.getMessage());
     }
-    return body(code, ex.getMessage(), ex.field(), request);
+    var response = body(code, ex.getMessage(), ex.field(), request);
+    if (ex instanceof RateLimitException limited) {
+      return ResponseEntity.status(code.status())
+          .headers(response.getHeaders())
+          .header(HttpHeaders.RETRY_AFTER, Long.toString(limited.retryAfterSeconds()))
+          .body(response.getBody());
+    }
+    return response;
   }
 
   /** Всё непредвиденное: клиенту общий текст, причина только в журнале. */

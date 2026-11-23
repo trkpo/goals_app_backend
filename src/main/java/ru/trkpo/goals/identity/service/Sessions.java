@@ -26,36 +26,53 @@ public class Sessions {
   private final IdentityStore store;
   private final PasswordEncoder passwords;
   private final AccessTokens accessTokens;
+  private final AuthRateLimits rateLimits;
   private final SecureRandom random = new SecureRandom();
 
-  public Sessions(IdentityStore store, PasswordEncoder passwords, AccessTokens accessTokens) {
+  public Sessions(
+      IdentityStore store,
+      PasswordEncoder passwords,
+      AccessTokens accessTokens,
+      AuthRateLimits rateLimits) {
     this.store = store;
     this.passwords = passwords;
     this.accessTokens = accessTokens;
+    this.rateLimits = rateLimits;
   }
 
   public record Grant(AccessTokens.Token access, String refresh) {}
 
   public record Login(Identity identity, Grant grant) {}
 
-  @Transactional
+  @Transactional(noRollbackFor = ApiException.class)
   public Login login(String email, String password) {
-    var credentials =
-        store
-            .findCredentials(email)
-            .filter(found -> found.identity().emailConfirmed())
-            .orElseThrow(() -> new ApiException(ErrorCode.USER_NOT_FOUND, "email"));
-
-    // BCrypt uses at most 72 UTF-8 bytes. Avoid truncation and reject oversized input.
-    if (password.getBytes(StandardCharsets.UTF_8).length > 72
-        || !passwords.matches(password, credentials.passwordHash())) {
-      throw new ApiException(ErrorCode.INVALID_PASSWORD, "password");
-    }
-
+    rateLimits.checkLogin(email);
+    var credentials = authenticate(email, password);
     UUID userId = credentials.identity().id();
     String refresh = newRefreshToken();
     store.createSession(userId, hash(refresh), REFRESH_TTL);
     return new Login(credentials.identity(), new Grant(accessTokens.issue(userId), refresh));
+  }
+
+  private IdentityStore.Credentials authenticate(String email, String password) {
+    var credentials =
+        store
+            .findCredentials(email)
+            .filter(found -> found.identity().emailConfirmed())
+            .orElseThrow(
+                () -> {
+                  rateLimits.recordFailedLogin(email);
+                  return new ApiException(ErrorCode.USER_NOT_FOUND, "email");
+                });
+
+    // BCrypt uses at most 72 UTF-8 bytes. Avoid truncation and reject oversized input.
+    if (password.getBytes(StandardCharsets.UTF_8).length > 72
+        || !passwords.matches(password, credentials.passwordHash())) {
+      rateLimits.recordFailedLogin(email);
+      throw new ApiException(ErrorCode.INVALID_PASSWORD, "password");
+    }
+
+    return credentials;
   }
 
   @Transactional
