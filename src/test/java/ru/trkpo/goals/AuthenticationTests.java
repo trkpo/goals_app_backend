@@ -37,6 +37,7 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.support.TransactionTemplate;
 import ru.trkpo.goals.common.error.RateLimitException;
 import ru.trkpo.goals.identity.service.AuthRateLimits;
 import ru.trkpo.goals.identity.service.AuthRateLimits.CodePurpose;
@@ -60,6 +61,7 @@ class AuthenticationTests {
   @Autowired private JdbcClient db;
   @Autowired private JsonMapper json;
   @Autowired private AuthRateLimits rateLimits;
+  @Autowired private TransactionTemplate transactions;
 
   private UUID userId;
   private String email;
@@ -152,6 +154,28 @@ class AuthenticationTests {
               RateLimitException.class,
               error -> assertThat(error.retryAfterSeconds()).isBetween(1L, 300L));
     }
+  }
+
+  @Test
+  void codeVerificationBudgetSurvivesCallerRollbackAndExpires() {
+    var purpose = CodePurpose.EMAIL_CONFIRMATION;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      transactions.executeWithoutResult(
+          transaction -> {
+            rateLimits.recordCodeVerification(purpose, email);
+            transaction.setRollbackOnly();
+          });
+    }
+
+    assertThatThrownBy(() -> rateLimits.recordCodeVerification(purpose, email))
+        .isInstanceOfSatisfying(
+            RateLimitException.class,
+            error -> assertThat(error.retryAfterSeconds()).isBetween(1L, 60L));
+
+    db.sql("update identity.auth_rate_attempts set expires_at = now() where subject = :email")
+        .param("email", email)
+        .update();
+    rateLimits.recordCodeVerification(purpose, email);
   }
 
   @Test
