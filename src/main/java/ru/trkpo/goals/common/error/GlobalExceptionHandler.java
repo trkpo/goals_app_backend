@@ -37,7 +37,15 @@ public class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     } else {
       log.debug("Ошибка {}: {}", code, ex.getMessage());
     }
-    return body(code, ex.getMessage(), ex.field(), request);
+    ResponseEntity<Object> response = body(code, ex.getMessage(), ex.field(), request);
+    if (ex.retryAfter() != null && code.status() == HttpStatus.TOO_MANY_REQUESTS) {
+      long seconds = Math.max(1, ex.retryAfter().toSeconds());
+      return ResponseEntity.status(response.getStatusCode())
+          .headers(response.getHeaders())
+          .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
+          .body(response.getBody());
+    }
+    return response;
   }
 
   /** Всё непредвиденное: клиенту общий текст, причина только в журнале. */
