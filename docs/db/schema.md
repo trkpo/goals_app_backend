@@ -55,7 +55,7 @@ erDiagram
 | `created_at` | `timestamptz` | NOT NULL, `now()` |
 | `updated_at` | `timestamptz` | NOT NULL, `now()` |
 | `version` | `bigint` | NOT NULL, `0` |
-| `deleted_at` | `timestamptz` | NULL; мягкое удаление до очистки (F_Prof_6) |
+| `deleted_at` | `timestamptz` | NULL; soft-delete до очистки: блокирует вход, дочерние строки удаляются явно в транзакции (раздел 9) |
 
 Индексы:
 
@@ -292,7 +292,7 @@ erDiagram
 
 Индексы: `(occurred_at DESC, id DESC)`, `(user_id, occurred_at DESC, id DESC)`, `(entity_type, entity_id, occurred_at DESC, id DESC)` под `audit.events.list`. Триггер `audit_events_append_only` отклоняет `UPDATE` и `DELETE`.
 
-## 9. Каскады
+## 9. Каскады и удаление учётной записи
 
 | Удаляется | Каскадно удаляется |
 |-----------|--------------------|
@@ -302,7 +302,22 @@ erDiagram
 | `profiles.avatars` | `avatar_id` в профилях становится `NULL` |
 | `audit.events` | не удаляется; `user_id` хранится без FK |
 
-Удаление учётной записи выполняется одной транзакцией (NF_Data_1). Строки производной ленты снимает задание очистки в течение 24 часов.
+`ON DELETE CASCADE` срабатывает только при физическом `DELETE` строки-владельца. Поэтому контракт `DELETE /api/v1/profiles/me` выполняется не обновлением `deleted_at`, а явной транзакцией сервиса:
+
+1. `UPDATE identity.users SET deleted_at = now(), version = version + 1 WHERE id = :user_id AND deleted_at IS NULL` — блокирует вход и повторное удаление; строка остаётся для идемпотентности и аудита.
+2. В той же транзакции удаляются зависимые данные, на которые не сработает каскад от soft-delete:
+   - `DELETE FROM identity.sessions WHERE user_id = :user_id` — немедленный отзыв всех сеансов (NF_Sec_4);
+   - `DELETE FROM identity.email_confirmation_codes WHERE user_id = :user_id`;
+   - `DELETE FROM identity.password_reset_requests WHERE user_id = :user_id`;
+   - `DELETE FROM feed.reactions WHERE user_id = :user_id` — реакции пользователя на чужие публикации;
+   - `DELETE FROM feed.publications WHERE author_id = :user_id` — публикации автора и реакции на них;
+   - `DELETE FROM goals.goals WHERE user_id = :user_id` — каскад удаляет итоги, публикации, напоминания и уведомления;
+   - `DELETE FROM profiles.profiles WHERE user_id = :user_id`;
+   - `DELETE FROM notifications.settings WHERE user_id = :user_id`.
+3. `identity.users` с заполненным `deleted_at` удаляется заданием очистки в течение 24 часов. К этому моменту дочерних строк уже нет, а `ON DELETE CASCADE` остаётся страховкой для будущих таблиц.
+4. Строки производной ленты (ScyllaDB) снимает задание очистки в течение 24 часов (NF_Data_1).
+
+Доступ к личным целям и публикациям прекращается сразу после шага 1: запросы identity фильтруют `deleted_at IS NULL`, а удалённые цели и публикации уже отсутствуют. `audit.events` не удаляется.
 
 ## 10. Версии, `updated_at` и конкурентные правки
 
