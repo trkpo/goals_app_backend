@@ -24,6 +24,24 @@ server:
     include-message: never
     include-stacktrace: never
 
+identity:
+  code-pepper: ${IDENTITY_CODE_PEPPER:dev-code-pepper-change-me}
+  reset-token-pepper: ${IDENTITY_RESET_TOKEN_PEPPER:dev-reset-token-pepper-change-me}
+  code-ttl: 10m
+  reset-token-ttl: 10m
+  request-cooldown: 5m
+  verify-limit: 3
+  verify-window: 1m
+  bcrypt-strength: ${IDENTITY_BCRYPT_STRENGTH:12}
+  email:
+    backend: ${IDENTITY_EMAIL_BACKEND:console}
+    from: ${IDENTITY_EMAIL_FROM:no-reply@goals.local}
+    host: ${IDENTITY_EMAIL_HOST:localhost}
+    port: ${IDENTITY_EMAIL_PORT:25}
+    username: ${IDENTITY_EMAIL_USERNAME:}
+    password: ${IDENTITY_EMAIL_PASSWORD:}
+    starttls: ${IDENTITY_EMAIL_STARTTLS:true}
+
 management:
   endpoints:
     web:
