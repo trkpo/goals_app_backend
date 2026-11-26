@@ -39,6 +39,11 @@ dependencies {
 
 spotless {
     java {
+        target(
+            "src/main/java/**/*.java",
+            "src/test/java/**/*.java",
+            "src/dbTools/java/**/*.java",
+        )
         googleJavaFormat()
         removeUnusedImports()
         trimTrailingWhitespace()
@@ -61,4 +66,32 @@ tasks.withType<Test> {
 
 tasks.named<Jar>("jar") {
     enabled = false
+}
+
+sourceSets {
+    create("dbTools")
+}
+
+tasks.register<JavaExec>("dbRollback") {
+    group = "database"
+    description = "Rolls back applied migrations in reverse order"
+    classpath = sourceSets.main.get().runtimeClasspath + sourceSets["dbTools"].output
+    mainClass.set("ru.trkpo.goals.dbtools.RollbackRunner")
+    args("db/rollback")
+}
+
+tasks.register<Exec>("dbUp") {
+    group = "database"
+    description = "Starts the local PostgreSQL container"
+    commandLine("docker", "compose", "up", "-d", "db")
+}
+
+tasks.register<Exec>("dbDown") {
+    group = "database"
+    description = "Stops local containers without removing the database volume"
+    commandLine("docker", "compose", "down")
+}
+
+tasks.named("check") {
+    dependsOn("dbToolsClasses")
 }

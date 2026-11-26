@@ -42,6 +42,8 @@ spring:
   config:
     activate:
       on-profile: dev
+  flyway:
+    locations: classpath:db/migration,classpath:db/seed
 
 logging:
   level:
