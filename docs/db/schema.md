@@ -29,6 +29,7 @@ erDiagram
     GOALS ||--o| PUBLICATIONS : published_as
     USERS ||--o{ PUBLICATIONS : authors
     PUBLICATIONS ||--o{ REACTIONS : collects
+    PUBLICATIONS ||--o{ PROJECTION_DELETIONS : deleted_as
     USERS ||--o{ REACTIONS : gives
     USERS ||--o| NOTIFICATION_SETTINGS : configures
     USERS ||--o{ GOAL_REMINDERS : schedules
@@ -188,7 +189,7 @@ erDiagram
 
 ## 6. Домен feed
 
-Владелец: сервис `feed`. Готовые страницы ленты и окно популярности — производное хранилище (ScyllaDB), в PostgreSQL хранится истина: публикации и реакции.
+Владелец: сервис `feed`. Готовые страницы ленты и окно популярности — производное хранилище (ScyllaDB), в PostgreSQL хранится истина: публикации, реакции и сигналы удаления для задания проекции.
 
 ### `feed.publications`
 
@@ -224,6 +225,24 @@ erDiagram
 Счётчики по типам не хранятся в истине: они считаются `GROUP BY reaction` и попадают в карточку производного хранилища; `reactions_total` — сумма типов (ADR 0001, п. 3). Запрет реакции на свою публикацию проверяется сервисом.
 
 Индексы: `(publication_id, reaction)` для счётчиков; `(user_id)` для каскадов и выборок по пользователю.
+
+### `feed.projection_deletions`
+
+| Поле | Тип | Ограничения |
+|------|-----|-------------|
+| `id` | `uuid` | PK |
+| `publication_id` | `uuid` | NOT NULL; без FK — публикация может быть уже физически удалена |
+| `reason` | `feed.deletion_reason` | NOT NULL |
+| `occurred_at` | `timestamptz` | NOT NULL, `now()` |
+| `processed_at` | `timestamptz` | NULL, пока задание не очистило представление |
+| `attempts` | `integer` | NOT NULL, `0`, ≥ 0 |
+| `last_error` | `text` | NULL; текст последней ошибки очистки |
+
+Перечисление `feed.deletion_reason`: `publication_deleted`, `goal_deleted`, `account_deleted`.
+
+Это сигнал удаления, который переживает физическое удаление строки в `feed.publications`: задание проекции читает необработанные строки, удаляет карточку, строку порядка и строку окна популярности в ScyllaDB по `publication_id`, затем ставит `processed_at`. Ошибка увеличивает `attempts`, пишет `last_error` и оставляет строку в выборке — повторный запуск идемпотентен.
+
+Индексы: частичный `(occurred_at, id)` при `processed_at IS NULL` для выборки необработанных сигналов; частичный `(processed_at)` для очистки обработанных строк; `(publication_id)` для сверки и повторной обработки.
 
 ## 7. Домен notifications
 
@@ -305,7 +324,15 @@ erDiagram
 `ON DELETE CASCADE` срабатывает только при физическом `DELETE` строки-владельца. Поэтому контракт `DELETE /api/v1/profiles/me` выполняется не обновлением `deleted_at`, а явной транзакцией сервиса:
 
 1. `UPDATE identity.users SET deleted_at = now(), version = version + 1 WHERE id = :user_id AND deleted_at IS NULL` — блокирует вход и повторное удаление; строка остаётся для идемпотентности и аудита.
-2. В той же транзакции удаляются зависимые данные, на которые не сработает каскад от soft-delete:
+2. Перед физическим удалением в ту же транзакцию пишутся сигналы для задания проекции — по одному на каждую публикацию, которая исчезнет из PostgreSQL:
+   - удаление аккаунта:
+     `INSERT INTO feed.projection_deletions (publication_id, reason) SELECT p.id, 'account_deleted' FROM feed.publications p JOIN goals.goals g ON g.id = p.goal_id WHERE p.author_id = :user_id OR g.user_id = :user_id`;
+   - удаление цели (`goals.delete`):
+     `INSERT INTO feed.projection_deletions (publication_id, reason) SELECT id, 'goal_deleted' FROM feed.publications WHERE goal_id = :goal_id`;
+   - удаление публикации (`feed.publications.delete`):
+     `INSERT INTO feed.projection_deletions (publication_id, reason) VALUES (:publication_id, 'publication_deleted')`.
+   У `feed.projection_deletions` нет FK на `feed.publications`: сигнал должен пережить физическое удаление строки.
+3. В той же транзакции удаляются зависимые данные, на которые не сработает каскад от soft-delete:
    - `DELETE FROM identity.sessions WHERE user_id = :user_id` — немедленный отзыв всех сеансов (NF_Sec_4);
    - `DELETE FROM identity.email_confirmation_codes WHERE user_id = :user_id`;
    - `DELETE FROM identity.password_reset_requests WHERE user_id = :user_id`;
@@ -314,8 +341,8 @@ erDiagram
    - `DELETE FROM goals.goals WHERE user_id = :user_id` — каскад удаляет итоги, публикации, напоминания и уведомления;
    - `DELETE FROM profiles.profiles WHERE user_id = :user_id`;
    - `DELETE FROM notifications.settings WHERE user_id = :user_id`.
-3. `identity.users` с заполненным `deleted_at` удаляется заданием очистки в течение 24 часов. К этому моменту дочерних строк уже нет, а `ON DELETE CASCADE` остаётся страховкой для будущих таблиц.
-4. Строки производной ленты (ScyllaDB) снимает задание очистки в течение 24 часов (NF_Data_1).
+4. `identity.users` с заполненным `deleted_at` удаляется заданием очистки в течение 24 часов. К этому моменту дочерних строк уже нет, а `ON DELETE CASCADE` остаётся страховкой для будущих таблиц.
+5. Задание проекции выбирает необработанные строки `feed.projection_deletions` (`processed_at IS NULL`), удаляет карточку, строку порядка и строку окна популярности в ScyllaDB по `publication_id` и ставит `processed_at`. При ошибке увеличиваются `attempts` и `last_error`, строка остаётся в выборке; повторный запуск идемпотентен. Это гарантирует очистку ленты в течение 24 часов (NF_Data_1), даже если строка публикации уже физически удалена.
 
 Доступ к личным целям и публикациям прекращается сразу после шага 1: запросы identity фильтруют `deleted_at IS NULL`, а удалённые цели и публикации уже отсутствуют. `audit.events` не удаляется.
 
@@ -333,6 +360,7 @@ erDiagram
 | `goals.reflections` | нет | нет |
 | `feed.publications` | да | да |
 | `feed.reactions` | нет | да |
+| `feed.projection_deletions` | нет | нет |
 | `notifications.settings` | да | да |
 | `notifications.reminders` | да | да |
 | `notifications.notifications` | да | да |
@@ -355,7 +383,7 @@ erDiagram
 
 ## 12. Производные данные и идемпотентность
 
-- Готовые страницы ленты, окно популярности и прогресс переноса хранятся в ScyllaDB (HLD 7.3). В PostgreSQL остаются только истинные публикации, реакции и `version`, по которому задание проекции выбирает изменения.
+- Готовые страницы ленты, окно популярности и прогресс переноса хранятся в ScyllaDB (HLD 7.3). В PostgreSQL остаются истинные публикации, реакции и сигналы изменений: `version` для обновлений и `feed.projection_deletions` для удалений. Удаление физически убирает строку публикации, поэтому без отдельного сигнала задание проекции не смогло бы найти её в ScyllaDB.
 - `Idempotency-Key` и результат запроса хранятся 24 часа в Redis (область «пользователь + метод + путь»); отдельной таблицы в общей базе нет (ADR 0001, п. 7).
 - Ограничение частоты и отзыв сеансов также используют Redis; в базе хранятся только сами сеансы.
 
@@ -367,9 +395,10 @@ erDiagram
 | `identity.auth.login`, `refresh`, выход | `identity.users`, `identity.sessions` |
 | `identity.password.*` | `identity.password_reset_requests`, `identity.users` |
 | `identity.users.me` | `identity.users` |
-| `profiles.*` | `profiles.profiles`, `profiles.avatars`, `identity.users` |
-| `goals.create`, `list`, `get`, `update`, `status.update`, `delete` | `goals.goals`, `goals.reflections` |
-| `feed.publications.*` | `feed.publications`, `goals.goals`, `goals.reflections` |
+| `profiles.*` | `profiles.profiles`, `profiles.avatars`, `identity.users`, `feed.projection_deletions` (delete) |
+| `goals.create`, `list`, `get`, `update`, `status.update` | `goals.goals`, `goals.reflections` |
+| `goals.delete` | `goals.goals`, `goals.reflections`, `feed.projection_deletions` |
+| `feed.publications.*` | `feed.publications`, `goals.goals`, `goals.reflections`, `feed.projection_deletions` |
 | `feed.reactions.*` | `feed.reactions`, `feed.publications` |
 | `feed.list` | `feed.publications`, `feed.reactions` (истина), производное хранилище (чтение) |
 | `notifications.settings.*` | `notifications.settings` |
