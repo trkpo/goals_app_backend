@@ -25,6 +25,13 @@ services:
       DB_USER: goals
       DB_PASSWORD: ${DB_PASSWORD:-goals}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-}
+      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-}
+      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
+      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
+      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      SMTP_AUTH: ${SMTP_AUTH:-true}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
     ports:
       - "8080:8080"
     depends_on:
