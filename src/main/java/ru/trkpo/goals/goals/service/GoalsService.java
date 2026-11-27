@@ -1,11 +1,15 @@
 package ru.trkpo.goals.goals.service;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import ru.trkpo.goals.common.error.ApiException;
 import ru.trkpo.goals.common.error.ErrorCode;
+import ru.trkpo.goals.goals.domain.CreatedGoal;
+import ru.trkpo.goals.goals.domain.GoalCreate;
+import ru.trkpo.goals.goals.domain.GoalPage;
 import ru.trkpo.goals.goals.domain.GoalUpdate;
 import ru.trkpo.goals.goals.domain.GoalView;
 import ru.trkpo.goals.goals.persistence.GoalStore;
@@ -17,6 +21,25 @@ public class GoalsService {
 
   public GoalsService(GoalStore store) {
     this.store = store;
+  }
+
+  @Transactional
+  public CreatedGoal create(UUID userId, GoalCreate goal) {
+    return store.insert(userId, goal);
+  }
+
+  @Transactional(readOnly = true)
+  public GoalPage list(UUID userId, List<String> statuses, String sort, int limit, String cursor) {
+    var decoded = CursorCodec.decode(cursor);
+    var rows = store.findPage(userId, statuses, "created_asc".equals(sort), decoded, limit);
+    boolean hasMore = rows.size() > limit;
+    var items = hasMore ? rows.subList(0, limit) : rows;
+    String nextCursor = null;
+    if (hasMore && !items.isEmpty()) {
+      var last = items.get(items.size() - 1);
+      nextCursor = CursorCodec.encode(last.createdAt(), last.id());
+    }
+    return new GoalPage(items, nextCursor, items.isEmpty());
   }
 
   @Transactional(readOnly = true)

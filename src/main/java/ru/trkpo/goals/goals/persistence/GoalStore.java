@@ -6,10 +6,15 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import ru.trkpo.goals.goals.domain.CreatedGoal;
+import ru.trkpo.goals.goals.domain.GoalCreate;
+import ru.trkpo.goals.goals.domain.GoalCursor;
+import ru.trkpo.goals.goals.domain.GoalSummary;
 import ru.trkpo.goals.goals.domain.GoalUpdate;
 import ru.trkpo.goals.goals.domain.GoalView;
 
@@ -89,6 +94,93 @@ public class GoalStore {
       spec = spec.param(entry.getKey(), entry.getValue());
     }
     spec.update();
+  }
+
+  public CreatedGoal insert(UUID userId, GoalCreate goal) {
+    return db.sql(
+            """
+            insert into goals.goals
+                (user_id, title, goal_text, path_text, expected_result, status, planned_end_at)
+            values
+                (:userId, :title, :goalText, :pathText, :expectedResult,
+                 cast(:status as goals.goal_status), cast(:plannedEndAt as timestamptz))
+            returning id, status, created_at, planned_end_at, expected_result, version
+            """)
+        .param("userId", userId)
+        .param("title", goal.title())
+        .param("goalText", goal.goalText())
+        .param("pathText", goal.pathText())
+        .param("expectedResult", goal.expectedResult())
+        .param("status", goal.publish() ? "active" : "draft")
+        .param("plannedEndAt", OffsetDateTime.ofInstant(goal.plannedEndAt(), ZoneOffset.UTC))
+        .query(
+            (rs, row) ->
+                new CreatedGoal(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("status"),
+                    toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+                    toInstant(rs.getObject("planned_end_at", OffsetDateTime.class)),
+                    rs.getString("expected_result"),
+                    rs.getLong("version")))
+        .single();
+  }
+
+  public List<GoalSummary> findPage(
+      UUID userId, List<String> statuses, boolean ascending, GoalCursor cursor, int limit) {
+    var sql =
+        new StringBuilder(
+            """
+            select g.id, g.title, g.status, g.created_at, g.planned_end_at,
+                   coalesce(r.self_score, 0) as self_score
+            from goals.goals g
+            left join goals.reflections r on r.goal_id = g.id
+            where g.user_id = :userId
+            """);
+    var params = new LinkedHashMap<String, Object>();
+    params.put("userId", userId);
+
+    if (!statuses.isEmpty()) {
+      sql.append(" and g.status in (");
+      for (int index = 0; index < statuses.size(); index++) {
+        if (index > 0) {
+          sql.append(", ");
+        }
+        sql.append("cast(:status").append(index).append(" as goals.goal_status)");
+        params.put("status" + index, statuses.get(index));
+      }
+      sql.append(")");
+    }
+
+    if (cursor != null) {
+      sql.append(
+          ascending
+              ? " and (g.created_at, g.id) > (:cursorCreatedAt, :cursorId)"
+              : " and (g.created_at, g.id) < (:cursorCreatedAt, :cursorId)");
+      params.put("cursorCreatedAt", OffsetDateTime.ofInstant(cursor.createdAt(), ZoneOffset.UTC));
+      params.put("cursorId", cursor.id());
+    }
+
+    sql.append(
+        ascending
+            ? " order by g.created_at asc, g.id asc"
+            : " order by g.created_at desc, g.id desc");
+    sql.append(" limit :limit");
+    params.put("limit", limit + 1);
+
+    var spec = db.sql(sql.toString());
+    for (var entry : params.entrySet()) {
+      spec = spec.param(entry.getKey(), entry.getValue());
+    }
+    return spec.query(
+            (rs, row) ->
+                new GoalSummary(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("title"),
+                    rs.getString("status"),
+                    toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+                    toInstant(rs.getObject("planned_end_at", OffsetDateTime.class)),
+                    rs.getDouble("self_score")))
+        .list();
   }
 
   private static GoalView view(ResultSet rs) throws SQLException {
