@@ -16,6 +16,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -24,6 +25,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -183,6 +185,77 @@ class IdempotencyTests {
     mvc.perform(delete(resource)).andExpect(status().isNotFound());
   }
 
+  @Test
+  void invalidKeysAreRejectedBeforeMutation() {
+    for (String key : new String[] {"", " ", "a".repeat(256)}) {
+      assertThatThrownBy(
+              () ->
+                  idempotency.execute(
+                      UUID.randomUUID().toString(),
+                      "POST",
+                      "/test/users",
+                      key,
+                      null,
+                      () -> {
+                        throw new AssertionError("Mutation must not run");
+                      }))
+          .isInstanceOfSatisfying(
+              ApiException.class,
+              failure -> assertThat(failure.code()).isEqualTo(ErrorCode.INVALID_REQUEST));
+    }
+  }
+
+  @Test
+  void sameKeyWithDifferentIfMatchConflicts() {
+    UUID actor = UUID.randomUUID();
+    var request = new MockHttpServletRequest("PATCH", "/test/users/1");
+    request.addHeader("Idempotency-Key", "change");
+    request.addHeader(HttpHeaders.IF_MATCH, "\"1\"");
+    idempotency.executeHttp(
+        actor, request, request.getRequestURI(), null, () -> ResponseEntity.noContent().build());
+    request.removeHeader(HttpHeaders.IF_MATCH);
+    request.addHeader(HttpHeaders.IF_MATCH, "\"2\"");
+
+    assertThatThrownBy(
+            () ->
+                idempotency.executeHttp(
+                    actor,
+                    request,
+                    request.getRequestURI(),
+                    null,
+                    () -> {
+                      throw new AssertionError("Mutation must not run");
+                    }))
+        .isInstanceOfSatisfying(
+            ApiException.class,
+            failure -> assertThat(failure.code()).isEqualTo(ErrorCode.IDEMPOTENCY_CONFLICT));
+  }
+
+  @Test
+  void clientErrorDoesNotReserveTheKey() {
+    String actor = UUID.randomUUID().toString();
+    String path = "/test/users";
+    assertThat(
+            idempotency
+                .execute(
+                    actor, "POST", path, "retry", null, () -> ResponseEntity.badRequest().build())
+                .getStatusCode()
+                .value())
+        .isEqualTo(400);
+    assertThat(
+            idempotency
+                .execute(
+                    actor,
+                    "POST",
+                    path,
+                    "retry",
+                    new byte[0],
+                    () -> ResponseEntity.created(URI.create(path + "/1")).build())
+                .getStatusCode()
+                .value())
+        .isEqualTo(201);
+  }
+
   @RestController
   class MutationEndpoint {
     private final UUID actor;
@@ -205,12 +278,15 @@ class IdempotencyTests {
     }
 
     @DeleteMapping("/test/users/{id}")
-    ResponseEntity<byte[]> delete(HttpServletRequest request, @PathVariable UUID id) {
+    ResponseEntity<byte[]> delete(
+        HttpServletRequest request,
+        @PathVariable UUID id,
+        @RequestBody(required = false) byte @Nullable [] body) {
       return idempotency.executeHttp(
           actor,
           request,
           "/test/users/" + id,
-          new byte[0],
+          body,
           () -> {
             int affected =
                 db.sql("delete from identity.users where id = :id").param("id", id).update();

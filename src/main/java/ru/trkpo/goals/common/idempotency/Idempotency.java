@@ -25,6 +25,8 @@ public class Idempotency {
   private static final TypeReference<Map<String, List<String>>> STORED_HEADERS =
       new TypeReference<>() {};
 
+  private static final byte[] EMPTY_BODY = new byte[0];
+
   private final JdbcClient db;
   private final JsonMapper json;
 
@@ -42,14 +44,14 @@ public class Idempotency {
       UUID actor,
       HttpServletRequest request,
       String path,
-      byte[] requestBody,
+      byte @Nullable [] requestBody,
       Supplier<ResponseEntity<?>> operation) {
     String key = request.getHeader("Idempotency-Key");
     byte[] fingerprint =
         key == null
             ? requestBody
             : json.writeValueAsBytes(
-                new HttpInput(request.getHeader(HttpHeaders.IF_MATCH), requestBody));
+                new HttpInput(request.getHeader(HttpHeaders.IF_MATCH), bodyOrEmpty(requestBody)));
     return execute(
         actor.toString(),
         request.getMethod(),
@@ -81,7 +83,7 @@ public class Idempotency {
       String method,
       String path,
       @Nullable String key,
-      byte[] requestBody,
+      byte @Nullable [] requestBody,
       Supplier<ResponseEntity<byte[]>> operation) {
     if (key == null) {
       return operation.get();
@@ -91,7 +93,7 @@ public class Idempotency {
     }
 
     var scope = new Scope(actor, method, path, key);
-    byte[] hash = sha256(requestBody);
+    byte[] hash = sha256(bodyOrEmpty(requestBody));
     db.sql("select pg_advisory_xact_lock(hashtextextended(:scope, 148560))")
         .param("scope", json.writeValueAsString(scope))
         .query((rs, row) -> Boolean.TRUE)
@@ -141,17 +143,6 @@ public class Idempotency {
         .param("headers", json.writeValueAsString(replayableHeaders(response.getHeaders())))
         .param("body", response.getBody(), java.sql.Types.BINARY)
         .update();
-    // Remove expired rows in bounded batches without blocking operations in other scopes.
-    db.sql(
-            """
-            delete from public.idempotency_results
-            where ctid in (
-                select ctid from public.idempotency_results
-                where expires_at <= clock_timestamp()
-                order by expires_at limit 100 for update skip locked
-            )
-            """)
-        .update();
     return response;
   }
 
@@ -188,6 +179,10 @@ public class Idempotency {
       }
     }
     return result;
+  }
+
+  private static byte[] bodyOrEmpty(byte @Nullable [] body) {
+    return body == null ? EMPTY_BODY : body;
   }
 
   private static byte[] sha256(byte[] body) {
