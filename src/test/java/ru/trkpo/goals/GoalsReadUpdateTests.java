@@ -1,5 +1,6 @@
 package ru.trkpo.goals;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -153,6 +154,53 @@ class GoalsReadUpdateTests {
         .andExpect(status().isConflict())
         .andExpect(header().string(HttpHeaders.ETAG, "\"1\""))
         .andExpect(jsonPath("$.code").value("VERSION_CONFLICT"));
+  }
+
+  @Test
+  void patchRejectsEmptyBody() throws Exception {
+    mvc.perform(
+            patch(GOALS + "/{id}", draftGoalId)
+                .header(HttpHeaders.AUTHORIZATION, auth())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isUnprocessableContent())
+        .andExpect(jsonPath("$.code").value("REQUIRED_FIELD"));
+  }
+
+  @Test
+  void patchRejectsExplicitNullField() throws Exception {
+    mvc.perform(
+            patch(GOALS + "/{id}", draftGoalId)
+                .header(HttpHeaders.AUTHORIZATION, auth())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":null}"))
+        .andExpect(status().isUnprocessableContent())
+        .andExpect(jsonPath("$.code").value("REQUIRED_FIELD"))
+        .andExpect(jsonPath("$.field").value("title"));
+  }
+
+  @Test
+  void patchIsIdempotentWithKey() throws Exception {
+    String body = "{\"title\":\"Idempotent title\"}";
+    for (int attempt = 0; attempt < 2; attempt++) {
+      mvc.perform(
+              patch(GOALS + "/{id}", draftGoalId)
+                  .header(HttpHeaders.AUTHORIZATION, auth())
+                  .header(HttpHeaders.IF_MATCH, "\"1\"")
+                  .header("Idempotency-Key", "patch-draft-1")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isOk())
+          .andExpect(header().string(HttpHeaders.ETAG, "\"2\""))
+          .andExpect(jsonPath("$.title").value("Idempotent title"));
+    }
+
+    assertThat(
+            db.sql("select version from goals.goals where id = :id")
+                .param("id", draftGoalId)
+                .query(Integer.class)
+                .single())
+        .isEqualTo(2);
   }
 
   @Test
