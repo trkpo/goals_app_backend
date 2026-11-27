@@ -72,7 +72,9 @@ tasks.named<Jar>("jar") {
 }
 
 sourceSets {
-    create("dbTools")
+    create("dbTools") {
+        compileClasspath += main.get().compileClasspath
+    }
 }
 
 tasks.register<JavaExec>("dbRollback") {

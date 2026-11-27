@@ -11,6 +11,7 @@ import java.sql.Statement;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
+import org.flywaydb.core.api.MigrationVersion;
 
 public final class RollbackRunner {
 
@@ -34,7 +35,7 @@ public final class RollbackRunner {
           statement.execute(Files.readString(script));
         }
         if (historyPresent) {
-          deleteVersion(connection, version(script));
+          deleteVersion(connection, version(script).getVersion());
         }
         connection.commit();
         System.out.println("Rolled back V" + version(script));
@@ -52,7 +53,7 @@ public final class RollbackRunner {
     try (Stream<Path> files = Files.list(directory)) {
       return files
           .filter(path -> path.getFileName().toString().endsWith(".sql"))
-          .sorted(Comparator.comparing((Path path) -> path.getFileName().toString()).reversed())
+          .sorted(Comparator.comparing(RollbackRunner::version).reversed())
           .toList();
     }
   }
@@ -73,13 +74,13 @@ public final class RollbackRunner {
     }
   }
 
-  private static String version(Path script) {
+  private static MigrationVersion version(Path script) {
     String name = script.getFileName().toString();
     int separator = name.indexOf("__");
     if (!name.startsWith("V") || separator < 0) {
       throw new IllegalArgumentException("Unexpected rollback file: " + name);
     }
-    return name.substring(1, separator);
+    return MigrationVersion.fromVersion(name.substring(1, separator));
   }
 
   private static String environment(String name, String fallback) {
