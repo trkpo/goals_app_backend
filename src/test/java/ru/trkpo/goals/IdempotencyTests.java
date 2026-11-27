@@ -2,7 +2,13 @@ package ru.trkpo.goals;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
@@ -14,8 +20,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
 import ru.trkpo.goals.common.error.ApiException;
 import ru.trkpo.goals.common.error.ErrorCode;
 import ru.trkpo.goals.common.idempotency.Idempotency;
@@ -136,6 +150,75 @@ class IdempotencyTests {
             new byte[0],
             () -> ResponseEntity.ok(createUser(email).toString().getBytes(StandardCharsets.UTF_8)));
     assertThat(retry.getBody()).isNotEmpty();
+  }
+
+  @Test
+  void httpPostAndDeleteReplayTheirOriginalResponses() throws Exception {
+    String email = UUID.randomUUID() + "@example.com";
+    String path = "/test/users";
+    var mvc = MockMvcBuilders.standaloneSetup(new MutationEndpoint(UUID.randomUUID())).build();
+    var create = post(path).header("Idempotency-Key", "create").content(email);
+    var original =
+        mvc.perform(create)
+            .andExpect(status().isCreated())
+            .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+            .andReturn()
+            .getResponse();
+    String resource = original.getHeader(HttpHeaders.LOCATION);
+    assertThat(resource).isNotNull();
+    mvc.perform(create)
+        .andExpect(status().isCreated())
+        .andExpect(header().string(HttpHeaders.LOCATION, resource))
+        .andExpect(content().bytes(original.getContentAsByteArray()));
+
+    assertThat(
+            db.sql("select count(*) from identity.users where email = :email")
+                .param("email", email)
+                .query(Integer.class)
+                .single())
+        .isEqualTo(1);
+    var remove = delete(resource).header("Idempotency-Key", "delete");
+    mvc.perform(remove).andExpect(status().isNoContent());
+    mvc.perform(remove).andExpect(status().isNoContent()).andExpect(content().string(""));
+    mvc.perform(delete(resource)).andExpect(status().isNotFound());
+  }
+
+  @RestController
+  class MutationEndpoint {
+    private final UUID actor;
+
+    MutationEndpoint(UUID actor) {
+      this.actor = actor;
+    }
+
+    @PostMapping("/test/users")
+    ResponseEntity<byte[]> create(HttpServletRequest request, @RequestBody byte[] body) {
+      return idempotency.executeHttp(
+          actor,
+          request,
+          "/test/users",
+          body,
+          () -> {
+            UUID id = createUser(new String(body, StandardCharsets.UTF_8));
+            return ResponseEntity.created(URI.create("/test/users/" + id)).body(id);
+          });
+    }
+
+    @DeleteMapping("/test/users/{id}")
+    ResponseEntity<byte[]> delete(HttpServletRequest request, @PathVariable UUID id) {
+      return idempotency.executeHttp(
+          actor,
+          request,
+          "/test/users/" + id,
+          new byte[0],
+          () -> {
+            int affected =
+                db.sql("delete from identity.users where id = :id").param("id", id).update();
+            return affected == 1
+                ? ResponseEntity.noContent().build()
+                : ResponseEntity.notFound().build();
+          });
+    }
   }
 
   private UUID createUser(String email) {

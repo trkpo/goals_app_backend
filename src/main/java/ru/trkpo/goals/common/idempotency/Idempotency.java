@@ -1,12 +1,15 @@
 package ru.trkpo.goals.common.idempotency;
 
+import jakarta.servlet.http.HttpServletRequest;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -28,6 +31,43 @@ public class Idempotency {
   public Idempotency(JdbcClient db, JsonMapper json) {
     this.db = db;
     this.json = json;
+  }
+
+  /**
+   * Execute a JSON API mutation for an authenticated actor. Use a canonical concrete API path and
+   * pass the same body bytes to the operation for deserialization and validation.
+   */
+  @Transactional
+  public ResponseEntity<byte[]> executeHttp(
+      UUID actor,
+      HttpServletRequest request,
+      String path,
+      byte[] requestBody,
+      Supplier<ResponseEntity<?>> operation) {
+    String key = request.getHeader("Idempotency-Key");
+    byte[] fingerprint =
+        key == null
+            ? requestBody
+            : json.writeValueAsBytes(
+                new HttpInput(request.getHeader(HttpHeaders.IF_MATCH), requestBody));
+    return execute(
+        actor.toString(),
+        request.getMethod(),
+        path,
+        key,
+        fingerprint,
+        () -> serialize(operation.get()));
+  }
+
+  private ResponseEntity<byte[]> serialize(ResponseEntity<?> response) {
+    var builder = ResponseEntity.status(response.getStatusCode()).headers(response.getHeaders());
+    if (response.getBody() == null) {
+      return builder.build();
+    }
+    if (response.getHeaders().getContentType() == null) {
+      builder.contentType(MediaType.APPLICATION_JSON);
+    }
+    return builder.body(json.writeValueAsBytes(response.getBody()));
   }
 
   /**
@@ -157,6 +197,8 @@ public class Idempotency {
       throw new IllegalStateException("SHA-256 is unavailable", exception);
     }
   }
+
+  private record HttpInput(@Nullable String ifMatch, byte[] body) {}
 
   private record Scope(String actor, String method, String path, String key) {}
 
