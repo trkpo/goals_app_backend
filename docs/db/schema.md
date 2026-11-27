@@ -91,6 +91,17 @@ erDiagram
 
 Индексы: `(user_id, created_at DESC)`; частичный уникальный `(user_id)` при `consumed_at IS NULL`. Пара `reset_token_hash` и `reset_token_expires_at` заполняется одновременно (CHECK).
 
+### `identity.password_recovery_events`
+
+| Поле | Тип | Ограничения |
+|------|-----|-------------|
+| `id` | `uuid` | PK |
+| `email` | `varchar(254)` | NOT NULL, нормализованный адрес |
+| `action` | `varchar(16)` | NOT NULL: `request`, `verify` |
+| `created_at` | `timestamptz` | NOT NULL |
+
+Используется для лимитов F_Auth_13 (не более 3 проверок кода в минуту) и F_Auth_14 (новый код не чаще раза в 5 минут). События пишутся в отдельной транзакции под advisory-lock по e-mail, поэтому лимиты соблюдаются всеми репликами сервиса. Индекс `(email, action, created_at)` обслуживает подсчёт попыток в окне.
+
 ### `identity.sessions`
 
 | Поле | Тип | Ограничения |
@@ -354,6 +365,7 @@ erDiagram
 | `identity.sessions` | нет | да |
 | `identity.email_confirmation_codes` | нет | нет |
 | `identity.password_reset_requests` | нет | нет |
+| `identity.password_recovery_events` | нет | нет |
 | `profiles.avatars` | да | да |
 | `profiles.profiles` | да | да |
 | `goals.goals` | да | да |
@@ -385,7 +397,7 @@ erDiagram
 
 - Готовые страницы ленты, окно популярности и прогресс переноса хранятся в ScyllaDB (HLD 7.3). В PostgreSQL остаются истинные публикации, реакции и сигналы изменений: `version` для обновлений и `feed.projection_deletions` для удалений. Удаление физически убирает строку публикации, поэтому без отдельного сигнала задание проекции не смогло бы найти её в ScyllaDB.
 - `Idempotency-Key` и результат запроса хранятся 24 часа в Redis (область «пользователь + метод + путь»); отдельной таблицы в общей базе нет (ADR 0001, п. 7).
-- Ограничение частоты и отзыв сеансов также используют Redis; в базе хранятся только сами сеансы.
+- Лимиты восстановления пароля хранятся в `identity.password_recovery_events`; в базе также хранятся сами сеансы, а их отзыв выполняется одной транзакцией со сменой пароля.
 
 ## 13. Соответствие API
 

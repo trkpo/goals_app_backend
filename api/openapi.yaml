@@ -1370,7 +1370,7 @@ components:
       summary: INVALID_CODE
       value:
         code: INVALID_CODE
-        message: "Код восстановления некорректный"
+        message: "Код подтверждения некорректный"
         field: code
         request_id: 7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44
     WeakNewPassword:
