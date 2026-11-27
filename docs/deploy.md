@@ -34,6 +34,7 @@ Workflow `Deploy` собирает образ, публикует его в `ghc
 | `SSH_PRIVATE_KEY` | приватный ключ, публичная часть — в `~/.ssh/authorized_keys` на сервере |
 | `SSH_KNOWN_HOSTS` | вывод `ssh-keyscan <SSH_HOST>` |
 | `DB_PASSWORD` | пароль PostgreSQL; без апострофа, обратной косой черты и переводов строк, остальные символы допустимы |
+| `AUTH_JWT_SECRET` | необязательный ключ подписи JWT, отдельный для каждого окружения, вывод `openssl rand -base64 32` |
 
 Переменные (Variables):
 

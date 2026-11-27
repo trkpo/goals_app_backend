@@ -86,6 +86,7 @@ jobs:
       SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
       SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      AUTH_JWT_SECRET: ${{ secrets.AUTH_JWT_SECRET }}
       DOMAIN: ${{ vars.DOMAIN }}
       IMAGE_TAG: ${{ needs.image.outputs.tag }}
       DEPLOY_DIR: /opt/goals-app
@@ -117,6 +118,14 @@ jobs:
               exit 1
               ;;
           esac
+          if [ -n "$AUTH_JWT_SECRET" ]; then
+            if [[ ! "$AUTH_JWT_SECRET" =~ ^[A-Za-z0-9+/]+={0,2}$ ]] ||
+              ! key_bytes=$(printf '%s' "$AUTH_JWT_SECRET" | base64 --decode | wc -c) ||
+              [ "$key_bytes" -lt 32 ]; then
+              echo "::error::AUTH_JWT_SECRET должен содержать не менее 32 байт в Base64"
+              exit 1
+            fi
+          fi
           echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
@@ -143,6 +152,7 @@ jobs:
             echo "SPRING_PROFILES_ACTIVE=$TARGET"
             echo "DOMAIN=$DOMAIN"
             printf "DB_PASSWORD='%s'\n" "$DB_PASSWORD"
+            printf "AUTH_JWT_SECRET='%s'\n" "$AUTH_JWT_SECRET"
           } | ssh target "umask 077 && cat > $DEPLOY_DIR/.env"
 
       - name: Start
