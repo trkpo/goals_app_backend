@@ -8,7 +8,7 @@
 
 | Каталог | Назначение |
 |---------|------------|
-| `src/main/resources/db/migration` | версионные миграции Flyway `V1…V6` |
+| `src/main/resources/db/migration` | версионные миграции Flyway `V1…V6.1` |
 | `src/main/resources/db/seed` | repeatable-миграция `R__dev_seed.sql` с данными для разработки |
 | `db/rollback` | down-скрипты для отката каждой версии |
 | `src/dbTools/java` | утилита отката, запускаемая Gradle-задачей `dbRollback` |
@@ -74,7 +74,7 @@ docker compose up --build
 
 ## 4. Применение миграций к пустой базе
 
-Flyway запускается при старте приложения и применяет `V1…V6`, затем repeatable-seed в профиле `dev`. Проверка выполняется тестами `GoalsAppBackendApplicationTests` и `SeedDataTests` на Testcontainers.
+Flyway запускается при старте приложения и применяет `V1…V6.1`, затем repeatable-seed в профиле `dev`. Проверка выполняется тестами `GoalsAppBackendApplicationTests` и `SeedDataTests` на Testcontainers.
 
 Ручной прогон на пустой базе:
 
@@ -90,7 +90,7 @@ docker compose up -d db
 ./gradlew dbRollback
 ```
 
-Задача выполняет down-скрипты из `db/rollback` в обратном порядке (`V6 → V1`), удаляет соответствующие строки из `flyway_schema_history` и очищает записи repeatable-миграций, чтобы seed применился повторно.
+Задача выполняет down-скрипты из `db/rollback` в обратном порядке (`V6.1 → V1`), удаляет соответствующие строки из `flyway_schema_history` и очищает записи repeatable-миграций, чтобы seed применился повторно.
 
 Параметры подключения совпадают с приложением и задаются переменными окружения:
 
