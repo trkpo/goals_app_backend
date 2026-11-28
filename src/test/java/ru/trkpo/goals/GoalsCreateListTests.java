@@ -172,6 +172,7 @@ class GoalsCreateListTests {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.items.length()").value(1))
         .andExpect(jsonPath("$.items[0].title").value("Draft goal"))
+        .andExpect(jsonPath("$.items[0].average_self_score").value(nullValue()))
         .andExpect(jsonPath("$.next_cursor").value(nullValue()));
 
     mvc.perform(get(GOALS).header(HttpHeaders.AUTHORIZATION, auth()).param("status", "active"))
@@ -189,6 +190,33 @@ class GoalsCreateListTests {
     mvc.perform(get(GOALS).header(HttpHeaders.AUTHORIZATION, auth()).param("cursor", "broken"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("INVALID_CURSOR"));
+  }
+
+  @Test
+  void createRejectsNullJsonBody() throws Exception {
+    mvc.perform(
+            post(GOALS)
+                .header(HttpHeaders.AUTHORIZATION, auth())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("null"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("INVALID_REQUEST"));
+  }
+
+  @Test
+  void createRejectsPastPlannedEndAt() throws Exception {
+    mvc.perform(
+            post(GOALS)
+                .header(HttpHeaders.AUTHORIZATION, auth())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"title":"New goal","goal_text":"Goal text","path_text":"Path",
+                     "expected_result":"Expected","planned_end_at":"2020-01-01T00:00:00Z"}
+                    """))
+        .andExpect(status().isUnprocessableContent())
+        .andExpect(jsonPath("$.code").value("INVALID_PLANNED_END_AT"))
+        .andExpect(jsonPath("$.field").value("planned_end_at"));
   }
 
   @Test

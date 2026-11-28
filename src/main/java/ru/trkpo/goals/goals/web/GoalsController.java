@@ -197,7 +197,13 @@ class GoalsController {
 
   private CreateGoalRequest parseCreate(byte[] body) {
     try {
-      return json.readValue(body == null ? new byte[0] : body, CreateGoalRequest.class);
+      var tree = json.readTree(body == null ? new byte[0] : body);
+      if (!tree.isObject()) {
+        throw new ApiException(ErrorCode.INVALID_REQUEST);
+      }
+      return json.readValue(body, CreateGoalRequest.class);
+    } catch (ApiException exception) {
+      throw exception;
     } catch (RuntimeException exception) {
       throw new ApiException(ErrorCode.INVALID_REQUEST);
     }
@@ -224,7 +230,7 @@ class GoalsController {
       throw new ApiException(ErrorCode.REQUIRED_FIELD, "planned_end_at");
     }
     if (!input.plannedEndAt().isAfter(Instant.now())) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, "planned_end_at");
+      throw new ApiException(ErrorCode.INVALID_PLANNED_END_AT, "planned_end_at");
     }
   }
 
@@ -288,7 +294,7 @@ class GoalsController {
       String status,
       Instant createdAt,
       Instant plannedEndAt,
-      double averageSelfScore) {
+      Double averageSelfScore) {
 
     static GoalItem from(GoalSummary goal) {
       return new GoalItem(

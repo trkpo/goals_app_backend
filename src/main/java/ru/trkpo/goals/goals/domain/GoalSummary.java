@@ -9,4 +9,4 @@ public record GoalSummary(
     String status,
     Instant createdAt,
     Instant plannedEndAt,
-    double averageSelfScore) {}
+    Double averageSelfScore) {}

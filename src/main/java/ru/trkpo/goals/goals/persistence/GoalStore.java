@@ -131,7 +131,7 @@ public class GoalStore {
         new StringBuilder(
             """
             select g.id, g.title, g.status, g.created_at, g.planned_end_at,
-                   coalesce(r.self_score, 0) as self_score
+                   r.self_score as self_score
             from goals.goals g
             left join goals.reflections r on r.goal_id = g.id
             where g.user_id = :userId
@@ -172,14 +172,16 @@ public class GoalStore {
       spec = spec.param(entry.getKey(), entry.getValue());
     }
     return spec.query(
-            (rs, row) ->
-                new GoalSummary(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("title"),
-                    rs.getString("status"),
-                    toInstant(rs.getObject("created_at", OffsetDateTime.class)),
-                    toInstant(rs.getObject("planned_end_at", OffsetDateTime.class)),
-                    rs.getDouble("self_score")))
+            (rs, row) -> {
+              Number score = (Number) rs.getObject("self_score");
+              return new GoalSummary(
+                  rs.getObject("id", UUID.class),
+                  rs.getString("title"),
+                  rs.getString("status"),
+                  toInstant(rs.getObject("created_at", OffsetDateTime.class)),
+                  toInstant(rs.getObject("planned_end_at", OffsetDateTime.class)),
+                  score == null ? null : score.doubleValue());
+            })
         .list();
   }
 
