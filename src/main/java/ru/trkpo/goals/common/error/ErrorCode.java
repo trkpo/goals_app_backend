@@ -48,6 +48,8 @@ public enum ErrorCode {
   REFLECTION_LOCKED(HttpStatus.CONFLICT, "Итог уже сохранён и не редактируется"),
   FACT_REQUIRED(HttpStatus.UNPROCESSABLE_CONTENT, "Опишите, что получилось на деле"),
   INVALID_SCORE(HttpStatus.UNPROCESSABLE_CONTENT, "Некорректная оценка"),
+  INVALID_PLANNED_END_AT(
+      HttpStatus.UNPROCESSABLE_CONTENT, "Плановая дата завершения должна быть в будущем"),
 
   // feed
   INVALID_SORT(HttpStatus.BAD_REQUEST, "Неизвестный вариант сортировки"),

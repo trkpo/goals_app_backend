@@ -9,7 +9,7 @@ info:
       (`HttpOnly; Secure; SameSite=Strict`).
     - Пагинация курсорная: `?limit=1..100&cursor=<opaque>`, в ответе `next_cursor` (`null` на последней странице).
     - Все ошибки возвращаются в едином конверте `Error`.
-    - Изменяющие операции принимают `Idempotency-Key`: повтор с тем же ключом возвращает результат первого запроса.
+    - Изменяющие операции принимают `Idempotency-Key`: после успешного ответа (2xx) повтор с тем же ключом возвращает сохранённый результат. Ошибки не сохраняются.
     - Ограничение частоты: `429 TOO_MANY_REQUESTS` с заголовком `Retry-After`.
 servers:
   - url: http://localhost:8080
@@ -1710,6 +1710,7 @@ components:
         - REFLECTION_LOCKED
         - FACT_REQUIRED
         - INVALID_SCORE
+        - INVALID_PLANNED_END_AT
         # feed
         - INVALID_SORT
         - INVALID_RESULT

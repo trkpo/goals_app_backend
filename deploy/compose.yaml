@@ -19,6 +19,10 @@ services:
   app:
     image: ${IMAGE:?IMAGE is required}
     restart: unless-stopped
+    env_file:
+      - path: ./smtp.env
+        required: false
+        format: raw
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE}
       DB_URL: jdbc:postgresql://db:5432/goals
