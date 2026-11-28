@@ -124,7 +124,7 @@ Body: `{ "email": "...", "password": "..." }`
 
 Headers: `Set-Cookie: refresh_token=...; HttpOnly; Secure; SameSite=Strict; Path=/api/v1/identity/auth; Max-Age=2592000`
 
-Клиент после успеха открывает вкладку «Мои цели» (F_Auth_6).
+Клиент после успеха открывает вкладку «Мои цели» (F_Auth_6). После пяти неудачных попыток входа за скользящую минуту API возвращает `429 TOO_MANY_REQUESTS` с `Retry-After` в секундах.
 
 Ошибки: `400 INVALID_EMAIL`, `400 REQUIRED_FIELD`, `401 USER_NOT_FOUND` / «Пользователь с таким e-mail не найден», `401 INVALID_PASSWORD` / «Неверный пароль», `429 TOO_MANY_REQUESTS`, `500 INTERNAL_ERROR`.
 Идемпотентность: нет.
