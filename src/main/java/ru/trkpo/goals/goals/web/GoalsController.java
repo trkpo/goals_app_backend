@@ -1,8 +1,6 @@
 package ru.trkpo.goals.goals.web;
 
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.Size;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
@@ -41,6 +39,8 @@ import tools.jackson.databind.json.JsonMapper;
 class GoalsController {
 
   private static final Set<String> VALID_STATUSES = Set.of("draft", "active", "completed");
+  private static final List<String> UPDATE_FIELDS =
+      List.of("title", "goal_text", "path_text", "planned_end_at", "expected_result");
 
   private final GoalsService goals;
   private final Idempotency idempotency;
@@ -118,28 +118,81 @@ class GoalsController {
   }
 
   @PatchMapping(path = "/{goalId}", consumes = MediaType.APPLICATION_JSON_VALUE)
-  ResponseEntity<?> update(
+  ResponseEntity<byte[]> update(
       @PathVariable UUID goalId,
       @RequestAttribute(AuthenticationWebConfiguration.AUTHENTICATED_USER) UUID userId,
       @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-      @Valid @RequestBody UpdateGoalRequest input,
+      @RequestBody(required = false) byte[] body,
       HttpServletRequest request) {
-    var outcome =
-        goals.update(
-            goalId,
-            userId,
-            parseIfMatch(ifMatch),
-            new GoalUpdate(
-                input.title(),
-                input.goalText(),
-                input.pathText(),
-                input.expectedResult(),
-                input.plannedEndAt()));
-    if (outcome.conflictVersion() != null) {
-      return versionConflict(outcome.conflictVersion(), request);
+    return idempotency.executeHttp(
+        userId,
+        request,
+        "/api/v1/goals/" + goalId,
+        body,
+        () -> {
+          var input = readUpdate(body);
+          validateUpdate(input);
+          var outcome =
+              goals.update(
+                  goalId,
+                  userId,
+                  parseIfMatch(ifMatch),
+                  new GoalUpdate(
+                      input.title(),
+                      input.goalText(),
+                      input.pathText(),
+                      input.expectedResult(),
+                      input.plannedEndAt()));
+          if (outcome.conflictVersion() != null) {
+            return versionConflict(outcome.conflictVersion(), request);
+          }
+          var goal = outcome.goal();
+          return ResponseEntity.ok().eTag(etag(goal.version())).body(GoalResponse.from(goal));
+        });
+  }
+
+  private UpdateGoalRequest readUpdate(byte[] body) {
+    try {
+      var tree = json.readTree(body == null ? new byte[0] : body);
+      if (!tree.isObject()) {
+        throw new ApiException(ErrorCode.INVALID_REQUEST);
+      }
+      boolean hasField = false;
+      for (String field : UPDATE_FIELDS) {
+        if (tree.has(field)) {
+          hasField = true;
+          if (tree.get(field).isNull()) {
+            throw new ApiException(ErrorCode.REQUIRED_FIELD, field);
+          }
+        }
+      }
+      if (!hasField) {
+        throw new ApiException(ErrorCode.REQUIRED_FIELD);
+      }
+      return json.readValue(body, UpdateGoalRequest.class);
+    } catch (ApiException exception) {
+      throw exception;
+    } catch (RuntimeException exception) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST);
     }
-    var goal = outcome.goal();
-    return ResponseEntity.ok().eTag(etag(goal.version())).body(GoalResponse.from(goal));
+  }
+
+  private static void validateUpdate(UpdateGoalRequest input) {
+    if (input.title() != null && (input.title().length() < 3 || input.title().length() > 100)) {
+      throw new ApiException(ErrorCode.TITLE_LENGTH, "title");
+    }
+    if (input.goalText() != null
+        && (input.goalText().isEmpty() || input.goalText().length() > 5000)) {
+      throw new ApiException(ErrorCode.TEXT_TOO_LONG, "goal_text");
+    }
+    if (input.pathText() != null
+        && (input.pathText().isEmpty() || input.pathText().length() > 5000)) {
+      throw new ApiException(ErrorCode.TEXT_TOO_LONG, "path_text");
+    }
+    if (input.expectedResult() != null
+        && (input.expectedResult().isEmpty() || input.expectedResult().length() > 500)) {
+      throw new ApiException(ErrorCode.TEXT_TOO_LONG, "expected_result");
+    }
   }
 
   private CreateGoalRequest parseCreate(byte[] body) {
@@ -250,10 +303,10 @@ class GoalsController {
 
   @JsonNaming(SnakeCaseStrategy.class)
   record UpdateGoalRequest(
-      @Size(min = 3, max = 100, message = "TITLE_LENGTH") String title,
-      @Size(min = 1, max = 5000, message = "TEXT_TOO_LONG") String goalText,
-      @Size(min = 1, max = 5000, message = "TEXT_TOO_LONG") String pathText,
-      @Size(min = 1, max = 500, message = "TEXT_TOO_LONG") String expectedResult,
+      String title,
+      String goalText,
+      String pathText,
+      String expectedResult,
       Instant plannedEndAt) {}
 
   @JsonNaming(SnakeCaseStrategy.class)
