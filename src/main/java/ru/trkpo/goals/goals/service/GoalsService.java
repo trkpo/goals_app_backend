@@ -51,7 +51,10 @@ public class GoalsService {
   public UpdateOutcome update(UUID goalId, UUID userId, Long expectedVersion, GoalUpdate update) {
     var locked =
         store.lock(goalId, userId).orElseThrow(() -> new ApiException(ErrorCode.NOT_FOUND));
-    if (expectedVersion != null && expectedVersion.longValue() != locked.version()) {
+    boolean versionMissingForNonDraft = expectedVersion == null && !"draft".equals(locked.status());
+    boolean versionMismatch =
+        expectedVersion != null && expectedVersion.longValue() != locked.version();
+    if (versionMissingForNonDraft || versionMismatch) {
       return new UpdateOutcome(null, locked.version());
     }
     if ("active".equals(locked.status()) && update.goalText() != null) {

@@ -707,7 +707,7 @@ paths:
       description: |
         В черновике можно менять все поля, этим же запросом работает автосохранение (F_Goal_13).
         У активной цели `goal_text` менять нельзя → `409 GOAL_LOCKED` (F_Goal_6).
-        Устаревшая правка (версия из `If-Match` не совпала) → `409 VERSION_CONFLICT`.
+        Устаревшая версия или отсутствие версии у цели вне черновика → `409 VERSION_CONFLICT` с текущим `ETag`.
         Статус меняется только через `PATCH /goals/{goal_id}/status`.
       parameters:
         - $ref: "#/components/parameters/IfMatch"
@@ -736,6 +736,11 @@ paths:
           $ref: "#/components/responses/NotFound"
         "409":
           description: Конфликт с текущим состоянием
+          headers:
+            ETag:
+              description: Текущая версия цели при конфликте версии
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -996,6 +1001,7 @@ paths:
       summary: Реакция на публикацию
       description: |
         Одна реакция на пользователя (F_Feed_6). Другой тип заменяет реакцию, тот же тип — снимает её (F_Feed_7).
+        Для безопасного повтора отправьте `Idempotency-Key` при первой попытке и повторите с тем же ключом и телом. Для нового действия нужен новый ключ.
         На свою публикацию реагировать нельзя → `403 CANNOT_REACT_TO_OWN`.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -1034,6 +1040,12 @@ paths:
                   $ref: "#/components/examples/CannotReactToOwn"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: IDEMPOTENCY_CONFLICT при повторе ключа с другим телом
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
     delete:
       tags: [feed]
       operationId: feedReactionsDelete
@@ -1261,7 +1273,7 @@ components:
       name: If-Match
       in: header
       required: false
-      description: ETag из ответа на чтение цели — признак версии. При несовпадении → `409 VERSION_CONFLICT`
+      description: "ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Версию можно пропустить только для цели в статусе draft; в остальных статусах отсутствие версии возвращает 409 VERSION_CONFLICT"
       schema:
         type: string
     Limit:
@@ -1686,6 +1698,8 @@ components:
         - INTERNAL_ERROR
         - CONFIRM_REQUIRED
         - VERSION_CONFLICT
+        - INVALID_CURSOR
+        - IDEMPOTENCY_CONFLICT
         # identity
         - INVALID_EMAIL
         - WEAK_PASSWORD

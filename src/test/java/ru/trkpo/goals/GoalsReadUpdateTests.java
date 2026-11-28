@@ -131,6 +131,18 @@ class GoalsReadUpdateTests {
   }
 
   @Test
+  void patchActiveGoalWithoutVersionReturnsConflict() throws Exception {
+    mvc.perform(
+            patch(GOALS + "/{id}", activeGoalId)
+                .header(HttpHeaders.AUTHORIZATION, auth())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"title\":\"Changed title\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(header().string(HttpHeaders.ETAG, "\"2\""))
+        .andExpect(jsonPath("$.code").value("VERSION_CONFLICT"));
+  }
+
+  @Test
   void patchActiveGoalRejectsGoalText() throws Exception {
     mvc.perform(
             patch(GOALS + "/{id}", activeGoalId)
