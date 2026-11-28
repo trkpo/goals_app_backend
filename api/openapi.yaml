@@ -1710,6 +1710,7 @@ components:
         - REFLECTION_LOCKED
         - FACT_REQUIRED
         - INVALID_SCORE
+        - INVALID_PLANNED_END_AT
         # feed
         - INVALID_SORT
         - INVALID_RESULT
