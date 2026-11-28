@@ -35,7 +35,7 @@ public class GoalsService {
       throw new ApiException(ErrorCode.GOAL_LOCKED, "goal_text");
     }
     if (update.plannedEndAt() != null && !update.plannedEndAt().isAfter(Instant.now())) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, "planned_end_at");
+      throw new ApiException(ErrorCode.INVALID_PLANNED_END_AT, "planned_end_at");
     }
     if (!update.empty()) {
       store.update(goalId, update);
