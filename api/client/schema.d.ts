@@ -343,7 +343,7 @@ export interface paths {
          * Изменение цели
          * @description В черновике можно менять все поля, этим же запросом работает автосохранение (F_Goal_13).
          *     У активной цели `goal_text` менять нельзя → `409 GOAL_LOCKED` (F_Goal_6).
-         *     Устаревшая правка (версия из `If-Match` не совпала) → `409 VERSION_CONFLICT`.
+         *     Устаревшая версия или отсутствие версии у цели вне черновика → `409 VERSION_CONFLICT` с текущим `ETag`.
          *     Статус меняется только через `PATCH /goals/{goal_id}/status`.
          */
         patch: operations["goalsUpdate"];
@@ -454,6 +454,7 @@ export interface paths {
         /**
          * Реакция на публикацию
          * @description Одна реакция на пользователя (F_Feed_6). Другой тип заменяет реакцию, тот же тип — снимает её (F_Feed_7).
+         *     Для безопасного повтора отправьте `Idempotency-Key` при первой попытке и повторите с тем же ключом и телом. Для нового действия нужен новый ключ.
          *     На свою публикацию реагировать нельзя → `403 CANNOT_REACT_TO_OWN`.
          */
         put: operations["feedReactionsSet"];
@@ -580,7 +581,7 @@ export interface components {
             request_id: string;
         };
         /** @enum {string} */
-        ErrorCode: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "REQUIRED_FIELD" | "TOO_MANY_REQUESTS" | "INTERNAL_ERROR" | "CONFIRM_REQUIRED" | "VERSION_CONFLICT" | "INVALID_CURSOR" | "IDEMPOTENCY_CONFLICT" | "INVALID_EMAIL" | "WEAK_PASSWORD" | "EMAIL_TAKEN" | "INVALID_CODE" | "USER_NOT_FOUND" | "INVALID_PASSWORD" | "REFRESH_INVALID" | "RESET_TOKEN_INVALID" | "RESET_TOKEN_EXPIRED" | "NICKNAME_INVALID" | "AVATAR_INVALID" | "AVATARS_UNAVAILABLE" | "PROFILE_NOT_FOUND" | "TITLE_LENGTH" | "TEXT_TOO_LONG" | "GOAL_LOCKED" | "INVALID_STATUS" | "INVALID_STATUS_TRANSITION" | "REFLECTION_LOCKED" | "FACT_REQUIRED" | "INVALID_SCORE" | "INVALID_SORT" | "INVALID_RESULT" | "REFLECTION_REQUIRED" | "DRAFT_NOT_PUBLISHABLE" | "ALREADY_PUBLISHED" | "INVALID_REACTION" | "CANNOT_REACT_TO_OWN" | "STREAM_UNAVAILABLE" | "INVALID_REMIND_AFTER_DAYS" | "GOAL_ID_REQUIRED";
+        ErrorCode: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "REQUIRED_FIELD" | "TOO_MANY_REQUESTS" | "INTERNAL_ERROR" | "CONFIRM_REQUIRED" | "VERSION_CONFLICT" | "INVALID_CURSOR" | "IDEMPOTENCY_CONFLICT" | "INVALID_EMAIL" | "WEAK_PASSWORD" | "EMAIL_TAKEN" | "INVALID_CODE" | "USER_NOT_FOUND" | "INVALID_PASSWORD" | "REFRESH_INVALID" | "RESET_TOKEN_INVALID" | "RESET_TOKEN_EXPIRED" | "NICKNAME_INVALID" | "AVATAR_INVALID" | "AVATARS_UNAVAILABLE" | "PROFILE_NOT_FOUND" | "TITLE_LENGTH" | "TEXT_TOO_LONG" | "GOAL_LOCKED" | "INVALID_STATUS" | "INVALID_STATUS_TRANSITION" | "REFLECTION_LOCKED" | "FACT_REQUIRED" | "INVALID_SCORE" | "INVALID_PLANNED_END_AT" | "INVALID_SORT" | "INVALID_RESULT" | "REFLECTION_REQUIRED" | "DRAFT_NOT_PUBLISHABLE" | "ALREADY_PUBLISHED" | "INVALID_REACTION" | "CANNOT_REACT_TO_OWN" | "STREAM_UNAVAILABLE" | "INVALID_REMIND_AFTER_DAYS" | "GOAL_ID_REQUIRED";
         /**
          * @description Курсор следующей страницы, `null` — страниц больше нет
          * @example eyJpZCI6IjEyMyJ9
@@ -786,7 +787,7 @@ export interface components {
              * @description `false` — черновик, `true` — сразу активная цель
              * @default false
              */
-            publish: boolean;
+            publish?: boolean;
             /**
              * Format: date-time
              * @description Плановая дата завершения, в будущем (F_Goal_14)
@@ -864,7 +865,7 @@ export interface components {
              * @description Сразу создать публикацию в ленте (F_Feed_4)
              * @default false
              */
-            publish_to_feed: boolean;
+            publish_to_feed?: boolean;
         };
         GoalStatusUpdateRequest: {
             /** @enum {string} */
@@ -900,10 +901,11 @@ export interface components {
             /** @example Пробежать полумарафон за 3 месяца */
             title: string;
             /**
+             * @description Текст итога; `null`, если результат «Сбылось» и текст не вводили
              * @example Пробежал 10 км из 12
              * @example но втянулся в бег
              */
-            text: string;
+            text: string | null;
             expected_result: components["schemas"]["ExpectedResult"];
             result: components["schemas"]["ReflectionResult"];
             /** @example 7 */
@@ -1015,23 +1017,6 @@ export interface components {
         };
     };
     responses: {
-        /** @description Некорректный запрос */
-        BadRequest: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "code": "INVALID_EMAIL",
-                 *       "message": "Некорректный адрес",
-                 *       "field": "email",
-                 *       "request_id": "7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44"
-                 *     }
-                 */
-                "application/json": components["schemas"]["Error"];
-            };
-        };
         /** @description Нет доступа или неверные учётные данные */
         Unauthorized: {
             headers: {
@@ -1083,23 +1068,6 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Конфликт с текущим состоянием */
-        Conflict: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "code": "EMAIL_TAKEN",
-                 *       "message": "Этот e-mail уже зарегистрирован",
-                 *       "field": "email",
-                 *       "request_id": "7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44"
-                 *     }
-                 */
-                "application/json": components["schemas"]["Error"];
-            };
-        };
         /** @description Срок действия истёк */
         Gone: {
             headers: {
@@ -1111,23 +1079,6 @@ export interface components {
                  *       "code": "RESET_TOKEN_EXPIRED",
                  *       "message": "Срок действия ссылки истёк, запросите код ещё раз",
                  *       "field": null,
-                 *       "request_id": "7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44"
-                 *     }
-                 */
-                "application/json": components["schemas"]["Error"];
-            };
-        };
-        /** @description Ошибка валидации, `field` указывает на поле формы */
-        UnprocessableEntity: {
-            headers: {
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "code": "REQUIRED_FIELD",
-                 *       "message": "Заполните поле",
-                 *       "field": "title",
                  *       "request_id": "7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44"
                  *     }
                  */
@@ -1169,29 +1120,11 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
-        /** @description Сервис временно недоступен */
-        ServiceUnavailable: {
-            headers: {
-                "Retry-After": components["headers"]["RetryAfter"];
-                [name: string]: unknown;
-            };
-            content: {
-                /**
-                 * @example {
-                 *       "code": "AVATARS_UNAVAILABLE",
-                 *       "message": "Набор аватаров временно недоступен",
-                 *       "field": null,
-                 *       "request_id": "7f3c2a1e-5b7d-4f0e-9a51-0c2d7e1b9f44"
-                 *     }
-                 */
-                "application/json": components["schemas"]["Error"];
-            };
-        };
     };
     parameters: {
         /** @description Повтор с тем же ключом возвращает результат первого запроса и не создаёт вторую запись */
         IdempotencyKey: string;
-        /** @description ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Необязателен: без заголовка изменение выполняется без проверки версии (только автосохранение черновика) */
+        /** @description ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Версию можно пропустить только для цели в статусе draft; в остальных статусах отсутствие версии возвращает 409 VERSION_CONFLICT */
         IfMatch: string;
         Limit: number;
         /** @description Непрозрачный курсор из `next_cursor` предыдущей страницы */
@@ -1240,8 +1173,24 @@ export interface operations {
                     "application/json": components["schemas"]["RegisterResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            409: components["responses"]["Conflict"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Конфликт с текущим состоянием */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
         };
@@ -1268,8 +1217,24 @@ export interface operations {
                     "application/json": components["schemas"]["EmailConfirmResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -1295,7 +1260,15 @@ export interface operations {
                     "application/json": components["schemas"]["EmailConfirmationSent"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -1322,8 +1295,24 @@ export interface operations {
                     "application/json": components["schemas"]["LoginResponse"];
                 };
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Нет доступа или неверные учётные данные */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
             500: components["responses"]["InternalError"];
         };
@@ -1347,7 +1336,15 @@ export interface operations {
                     "application/json": components["schemas"]["AccessToken"];
                 };
             };
-            401: components["responses"]["Unauthorized"];
+            /** @description Нет доступа или неверные учётные данные */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     identityPasswordRequest: {
@@ -1372,7 +1369,15 @@ export interface operations {
                     "application/json": components["schemas"]["CodeSent"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -1398,7 +1403,15 @@ export interface operations {
                     "application/json": components["schemas"]["ResetToken"];
                 };
             };
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -1422,8 +1435,24 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Нет доступа или неверные учётные данные */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             410: components["responses"]["Gone"];
         };
     };
@@ -1495,7 +1524,15 @@ export interface operations {
                     "application/json": components["schemas"]["AccountDeleted"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -1524,10 +1561,34 @@ export interface operations {
                     "application/json": components["schemas"]["MyProfile"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Конфликт с текущим состоянием */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyRequests"];
         };
     };
@@ -1551,8 +1612,24 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Нет доступа или неверные учётные данные */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     profilesAvatarsList: {
@@ -1574,7 +1651,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            503: components["responses"]["ServiceUnavailable"];
+            /** @description Сервис временно недоступен */
+            503: {
+                headers: {
+                    "Retry-After": components["headers"]["RetryAfter"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     profilesAvatarsGet: {
@@ -1608,7 +1694,16 @@ export interface operations {
                 content?: never;
             };
             404: components["responses"]["NotFound"];
-            503: components["responses"]["ServiceUnavailable"];
+            /** @description Сервис временно недоступен */
+            503: {
+                headers: {
+                    "Retry-After": components["headers"]["RetryAfter"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     profilesGet: {
@@ -1632,7 +1727,15 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
+            /** @description Объект не найден */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     goalsList: {
@@ -1660,7 +1763,6 @@ export interface operations {
                     "application/json": components["schemas"]["GoalList"];
                 };
             };
-            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
         };
     };
@@ -1690,7 +1792,15 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     goalsGet: {
@@ -1744,7 +1854,15 @@ export interface operations {
                 };
                 content?: never;
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
@@ -1754,7 +1872,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
-                /** @description ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Необязателен: без заголовка изменение выполняется без проверки версии (только автосохранение черновика) */
+                /** @description ETag из ответа на чтение цели — признак версии. Несовпадение → `409 VERSION_CONFLICT`. Версию можно пропустить только для цели в статусе draft; в остальных статусах отсутствие версии возвращает 409 VERSION_CONFLICT */
                 "If-Match"?: components["parameters"]["IfMatch"];
                 /** @description Повтор с тем же ключом возвращает результат первого запроса и не создаёт вторую запись */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
@@ -1783,8 +1901,26 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Конфликт с текущим состоянием */
+            409: {
+                headers: {
+                    /** @description Текущая версия цели при конфликте версии */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     goalsStatusUpdate: {
@@ -1814,12 +1950,36 @@ export interface operations {
                     "application/json": components["schemas"]["GoalStatusUpdated"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Конфликт с текущим состоянием */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     feedList: {
@@ -1846,7 +2006,15 @@ export interface operations {
                     "application/json": components["schemas"]["FeedPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     feedPublicationsCreate: {
@@ -1877,7 +2045,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
+            /** @description Конфликт с текущим состоянием */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     feedPublicationsDelete: {
@@ -1965,10 +2141,35 @@ export interface operations {
                     "application/json": components["schemas"]["ReactionState"];
                 };
             };
-            400: components["responses"]["BadRequest"];
+            /** @description Некорректный запрос */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description Действие запрещено */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             404: components["responses"]["NotFound"];
+            /** @description IDEMPOTENCY_CONFLICT при повторе ключа с другим телом */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     feedReactionsDelete: {
@@ -2016,7 +2217,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            503: components["responses"]["ServiceUnavailable"];
+            /** @description Сервис временно недоступен */
+            503: {
+                headers: {
+                    "Retry-After": components["headers"]["RetryAfter"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     notificationsSettingsGet: {
@@ -2066,7 +2276,15 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     notificationsActivitySet: {
@@ -2097,7 +2315,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            422: components["responses"]["UnprocessableEntity"];
+            /** @description Ошибка валидации, `field` указывает на поле формы */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     notificationsList: {
@@ -2151,7 +2377,6 @@ export interface operations {
                     "application/json": components["schemas"]["AuditEventPage"];
                 };
             };
-            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
         };
     };
