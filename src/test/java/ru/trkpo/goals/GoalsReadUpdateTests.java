@@ -216,6 +216,18 @@ class GoalsReadUpdateTests {
   }
 
   @Test
+  void patchRejectsPastPlannedEndAt() throws Exception {
+    mvc.perform(
+            patch(GOALS + "/{id}", draftGoalId)
+                .header(HttpHeaders.AUTHORIZATION, auth())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"planned_end_at\":\"2020-01-01T00:00:00Z\"}"))
+        .andExpect(status().isUnprocessableContent())
+        .andExpect(jsonPath("$.code").value("INVALID_PLANNED_END_AT"))
+        .andExpect(jsonPath("$.field").value("planned_end_at"));
+  }
+
+  @Test
   void patchDoesNotUpdateAnotherUsersGoal() throws Exception {
     mvc.perform(
             patch(GOALS + "/{id}", otherGoalId)
