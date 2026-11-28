@@ -1,6 +1,7 @@
 package ru.trkpo.goals;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -36,6 +37,10 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.support.TransactionTemplate;
+import ru.trkpo.goals.common.error.RateLimitException;
+import ru.trkpo.goals.identity.service.AuthRateLimits;
+import ru.trkpo.goals.identity.service.AuthRateLimits.CodePurpose;
 import tools.jackson.databind.json.JsonMapper;
 
 @Import(TestcontainersConfiguration.class)
@@ -55,6 +60,8 @@ class AuthenticationTests {
   @Autowired private MockMvc mvc;
   @Autowired private JdbcClient db;
   @Autowired private JsonMapper json;
+  @Autowired private AuthRateLimits rateLimits;
+  @Autowired private TransactionTemplate transactions;
 
   private UUID userId;
   private String email;
@@ -110,6 +117,65 @@ class AuthenticationTests {
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("INVALID_PASSWORD"))
         .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE));
+  }
+
+  @Test
+  void loginFailuresArePersistedAndExpire() throws Exception {
+    for (int attempt = 0; attempt < 5; attempt++) {
+      mvc.perform(login("Wrong123")).andExpect(status().isUnauthorized());
+    }
+    mvc.perform(login(PASSWORD))
+        .andExpect(status().isTooManyRequests())
+        .andExpect(header().exists(HttpHeaders.RETRY_AFTER))
+        .andExpect(jsonPath("$.code").value("TOO_MANY_REQUESTS"));
+    db.sql("update identity.auth_rate_attempts set expires_at = now() where subject = :email")
+        .param("email", email)
+        .update();
+    mvc.perform(login(PASSWORD)).andExpect(status().isOk());
+  }
+
+  @Test
+  void codeLimitsUseSeparateBucketsAndNormalizeEmail() {
+    for (var purpose : CodePurpose.values()) {
+      for (int attempt = 0; attempt < 3; attempt++) {
+        rateLimits.recordCodeVerification(purpose, email);
+      }
+      assertThatThrownBy(
+              () ->
+                  rateLimits.recordCodeVerification(
+                      purpose, email.toUpperCase(java.util.Locale.ROOT)))
+          .isInstanceOfSatisfying(
+              RateLimitException.class,
+              error -> assertThat(error.retryAfterSeconds()).isBetween(1L, 60L));
+
+      rateLimits.recordCodeRequest(purpose, email);
+      assertThatThrownBy(() -> rateLimits.recordCodeRequest(purpose, email))
+          .isInstanceOfSatisfying(
+              RateLimitException.class,
+              error -> assertThat(error.retryAfterSeconds()).isBetween(1L, 300L));
+    }
+  }
+
+  @Test
+  void codeVerificationBudgetSurvivesCallerRollbackAndExpires() {
+    var purpose = CodePurpose.EMAIL_CONFIRMATION;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      transactions.executeWithoutResult(
+          transaction -> {
+            rateLimits.recordCodeVerification(purpose, email);
+            transaction.setRollbackOnly();
+          });
+    }
+
+    assertThatThrownBy(() -> rateLimits.recordCodeVerification(purpose, email))
+        .isInstanceOfSatisfying(
+            RateLimitException.class,
+            error -> assertThat(error.retryAfterSeconds()).isBetween(1L, 60L));
+
+    db.sql("update identity.auth_rate_attempts set expires_at = now() where subject = :email")
+        .param("email", email)
+        .update();
+    rateLimits.recordCodeVerification(purpose, email);
   }
 
   @Test
