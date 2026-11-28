@@ -1,8 +1,10 @@
 package ru.trkpo.goals.goals.web;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -10,16 +12,20 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import ru.trkpo.goals.common.error.ApiException;
 import ru.trkpo.goals.common.error.ErrorCode;
 import ru.trkpo.goals.common.error.ErrorResponse;
 import ru.trkpo.goals.common.idempotency.Idempotency;
 import ru.trkpo.goals.common.web.RequestId;
+import ru.trkpo.goals.goals.domain.GoalCreate;
+import ru.trkpo.goals.goals.domain.GoalSummary;
 import ru.trkpo.goals.goals.domain.GoalUpdate;
 import ru.trkpo.goals.goals.domain.GoalView;
 import ru.trkpo.goals.goals.service.GoalsService;
@@ -32,6 +38,7 @@ import tools.jackson.databind.json.JsonMapper;
 @RequestMapping("/api/v1/goals")
 class GoalsController {
 
+  private static final Set<String> VALID_STATUSES = Set.of("draft", "active", "completed");
   private static final List<String> UPDATE_FIELDS =
       List.of("title", "goal_text", "path_text", "planned_end_at", "expected_result");
 
@@ -43,6 +50,63 @@ class GoalsController {
     this.goals = goals;
     this.idempotency = idempotency;
     this.json = json;
+  }
+
+  @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+  ResponseEntity<byte[]> create(
+      @RequestAttribute(AuthenticationWebConfiguration.AUTHENTICATED_USER) UUID userId,
+      @RequestBody(required = false) byte[] body,
+      HttpServletRequest request) {
+    return idempotency.executeHttp(
+        userId,
+        request,
+        "/api/v1/goals",
+        body,
+        () -> {
+          var input = parseCreate(body);
+          validateCreate(input);
+          var created =
+              goals.create(
+                  userId,
+                  new GoalCreate(
+                      input.title(),
+                      input.goalText(),
+                      input.pathText(),
+                      input.expectedResult(),
+                      input.plannedEndAt(),
+                      Boolean.TRUE.equals(input.publish())));
+          return ResponseEntity.created(URI.create("/api/v1/goals/" + created.id()))
+              .eTag(etag(created.version()))
+              .body(
+                  new CreateGoalResponse(
+                      created.id(),
+                      created.status(),
+                      created.createdAt(),
+                      created.plannedEndAt(),
+                      created.expectedResult()));
+        });
+  }
+
+  @GetMapping
+  GoalListResponse list(
+      @RequestAttribute(AuthenticationWebConfiguration.AUTHENTICATED_USER) UUID userId,
+      @RequestParam(required = false) List<String> status,
+      @RequestParam(defaultValue = "created_desc") String sort,
+      @RequestParam(defaultValue = "20") int limit,
+      @RequestParam(required = false) String cursor) {
+    var statuses = status == null ? List.<String>of() : status;
+    if (statuses.stream().anyMatch(value -> !VALID_STATUSES.contains(value))) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, "status");
+    }
+    if (!"created_desc".equals(sort) && !"created_asc".equals(sort)) {
+      throw new ApiException(ErrorCode.INVALID_SORT, "sort");
+    }
+    if (limit < 1 || limit > 100) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, "limit");
+    }
+    var page = goals.list(userId, statuses, sort, limit, cursor);
+    return new GoalListResponse(
+        page.items().stream().map(GoalItem::from).toList(), page.nextCursor(), page.empty());
   }
 
   @GetMapping("/{goalId}")
@@ -131,6 +195,51 @@ class GoalsController {
     }
   }
 
+  private CreateGoalRequest parseCreate(byte[] body) {
+    try {
+      var tree = json.readTree(body == null ? new byte[0] : body);
+      if (!tree.isObject()) {
+        throw new ApiException(ErrorCode.INVALID_REQUEST);
+      }
+      return json.readValue(body, CreateGoalRequest.class);
+    } catch (ApiException exception) {
+      throw exception;
+    } catch (RuntimeException exception) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST);
+    }
+  }
+
+  private static void validateCreate(CreateGoalRequest input) {
+    require(input.title(), "title");
+    if (input.title().length() < 3 || input.title().length() > 100) {
+      throw new ApiException(ErrorCode.TITLE_LENGTH, "title");
+    }
+    require(input.goalText(), "goal_text");
+    if (input.goalText().length() > 5000) {
+      throw new ApiException(ErrorCode.TEXT_TOO_LONG, "goal_text");
+    }
+    require(input.pathText(), "path_text");
+    if (input.pathText().length() > 5000) {
+      throw new ApiException(ErrorCode.TEXT_TOO_LONG, "path_text");
+    }
+    require(input.expectedResult(), "expected_result");
+    if (input.expectedResult().length() > 500) {
+      throw new ApiException(ErrorCode.TEXT_TOO_LONG, "expected_result");
+    }
+    if (input.plannedEndAt() == null) {
+      throw new ApiException(ErrorCode.REQUIRED_FIELD, "planned_end_at");
+    }
+    if (!input.plannedEndAt().isAfter(Instant.now())) {
+      throw new ApiException(ErrorCode.INVALID_PLANNED_END_AT, "planned_end_at");
+    }
+  }
+
+  private static void require(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw new ApiException(ErrorCode.REQUIRED_FIELD, field);
+    }
+  }
+
   private static ResponseEntity<ErrorResponse> versionConflict(
       long version, HttpServletRequest request) {
     var code = ErrorCode.VERSION_CONFLICT;
@@ -160,6 +269,42 @@ class GoalsController {
 
   private static String etag(long version) {
     return "\"" + version + "\"";
+  }
+
+  @JsonNaming(SnakeCaseStrategy.class)
+  record CreateGoalRequest(
+      String title,
+      String goalText,
+      String pathText,
+      String expectedResult,
+      Instant plannedEndAt,
+      Boolean publish) {}
+
+  @JsonNaming(SnakeCaseStrategy.class)
+  record CreateGoalResponse(
+      UUID goalId, String status, Instant createdAt, Instant plannedEndAt, String expectedResult) {}
+
+  @JsonNaming(SnakeCaseStrategy.class)
+  record GoalListResponse(List<GoalItem> items, String nextCursor, boolean empty) {}
+
+  @JsonNaming(SnakeCaseStrategy.class)
+  record GoalItem(
+      UUID goalId,
+      String title,
+      String status,
+      Instant createdAt,
+      Instant plannedEndAt,
+      Double averageSelfScore) {
+
+    static GoalItem from(GoalSummary goal) {
+      return new GoalItem(
+          goal.id(),
+          goal.title(),
+          goal.status(),
+          goal.createdAt(),
+          goal.plannedEndAt(),
+          goal.averageSelfScore());
+    }
   }
 
   @JsonNaming(SnakeCaseStrategy.class)
